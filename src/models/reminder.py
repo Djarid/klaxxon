@@ -1,4 +1,4 @@
-"""Meeting model and state definitions."""
+"""Reminder model and state definitions."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from datetime import datetime
 from typing import Optional
 
 
-class MeetingState(str, enum.Enum):
-    """Meeting lifecycle states."""
+class ReminderState(str, enum.Enum):
+    """Reminder lifecycle states."""
 
     PENDING = "pending"
     REMINDING = "reminding"
@@ -19,8 +19,8 @@ class MeetingState(str, enum.Enum):
 
 
 @dataclass
-class Meeting:
-    """A scheduled meeting that requires reminder escalation."""
+class Reminder:
+    """A scheduled reminder that requires reminder escalation."""
 
     id: Optional[int] = None
     title: str = ""
@@ -28,7 +28,7 @@ class Meeting:
     duration_min: int = 90
     link: Optional[str] = None
     source: str = "manual"
-    state: MeetingState = MeetingState.PENDING
+    state: ReminderState = ReminderState.PENDING
     ack_keyword: Optional[str] = None
     ack_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

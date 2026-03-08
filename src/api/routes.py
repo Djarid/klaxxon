@@ -1,7 +1,7 @@
-"""API routes: thin layer that delegates to MeetingService.
+"""API routes: thin layer that delegates to ReminderService.
 
 Single Responsibility: HTTP request/response handling.
-DRY: all business logic is in MeetingService, not here.
+DRY: all business logic is in ReminderService, not here.
 """
 
 from __future__ import annotations
@@ -10,19 +10,19 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..models.meeting import MeetingState
+from ..models.reminder import ReminderState
 from ..models.schemas import (
     AckRequest,
     HealthResponse,
-    MeetingCreate,
-    MeetingListResponse,
-    MeetingResponse,
+    ReminderCreate,
+    ReminderListResponse,
+    ReminderResponse,
 )
-from ..services.meeting_service import (
-    DuplicateMeetingError,
-    MeetingNotFoundError,
-    MeetingService,
-    PastMeetingError,
+from ..services.reminder_service import (
+    DuplicateReminderError,
+    ReminderNotFoundError,
+    ReminderService,
+    PastReminderError,
 )
 from ..services.state_machine import InvalidTransitionError
 from .auth import verify_token
@@ -31,103 +31,103 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_token)])
 
 
 # These will be set by the composition root (main.py)
-_meeting_service: Optional[MeetingService] = None
+_reminder_service: Optional[ReminderService] = None
 _signal_available_fn = None
 
 
 def set_dependencies(
-    service: MeetingService,
+    service: ReminderService,
     signal_available_fn=None,
 ) -> None:
     """Set the service dependencies. Called from main.py."""
-    global _meeting_service, _signal_available_fn
-    _meeting_service = service
+    global _reminder_service, _signal_available_fn
+    _reminder_service = service
     _signal_available_fn = signal_available_fn
 
 
-def _get_service() -> MeetingService:
-    if _meeting_service is None:
+def _get_service() -> ReminderService:
+    if _reminder_service is None:
         raise HTTPException(status_code=503, detail="Service not initialised")
-    return _meeting_service
+    return _reminder_service
 
 
-@router.post("/meetings", response_model=MeetingResponse, status_code=201)
-async def create_meeting(body: MeetingCreate) -> MeetingResponse:
-    """Create a new meeting."""
+@router.post("/reminders", response_model=ReminderResponse, status_code=201)
+async def create_reminder(body: ReminderCreate) -> ReminderResponse:
+    """Create a new reminder."""
     svc = _get_service()
     try:
-        meeting = svc.create(
+        reminder = svc.create(
             title=body.title,
             starts_at=body.starts_at,
             duration_min=body.duration_min,
             link=body.link,
             source=body.source,
         )
-    except PastMeetingError as e:
+    except PastReminderError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except DuplicateMeetingError as e:
+    except DuplicateReminderError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return MeetingResponse.model_validate(meeting)
+    return ReminderResponse.model_validate(reminder)
 
 
-@router.get("/meetings", response_model=MeetingListResponse)
-async def list_meetings(state: Optional[MeetingState] = None) -> MeetingListResponse:
-    """List meetings, optionally filtered by state."""
+@router.get("/reminders", response_model=ReminderListResponse)
+async def list_reminders(state: Optional[ReminderState] = None) -> ReminderListResponse:
+    """List reminders, optionally filtered by state."""
     svc = _get_service()
-    meetings = svc.list_meetings(state=state)
-    return MeetingListResponse(
-        meetings=[MeetingResponse.model_validate(m) for m in meetings],
-        count=len(meetings),
+    reminders = svc.list_reminders(state=state)
+    return ReminderListResponse(
+        reminders=[ReminderResponse.model_validate(r) for r in reminders],
+        count=len(reminders),
     )
 
 
-@router.get("/meetings/{meeting_id}", response_model=MeetingResponse)
-async def get_meeting(meeting_id: int) -> MeetingResponse:
-    """Get a single meeting."""
+@router.get("/reminders/{reminder_id}", response_model=ReminderResponse)
+async def get_reminder(reminder_id: int) -> ReminderResponse:
+    """Get a single reminder."""
     svc = _get_service()
     try:
-        meeting = svc.get(meeting_id)
-    except MeetingNotFoundError:
-        raise HTTPException(status_code=404, detail="Meeting not found")
-    return MeetingResponse.model_validate(meeting)
+        reminder = svc.get(reminder_id)
+    except ReminderNotFoundError:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return ReminderResponse.model_validate(reminder)
 
 
-@router.post("/meetings/{meeting_id}/ack", response_model=MeetingResponse)
-async def ack_meeting(
-    meeting_id: int, body: AckRequest = AckRequest()
-) -> MeetingResponse:
-    """Acknowledge a meeting. Stops reminders."""
+@router.post("/reminders/{reminder_id}/ack", response_model=ReminderResponse)
+async def ack_reminder(
+    reminder_id: int, body: AckRequest = AckRequest()
+) -> ReminderResponse:
+    """Acknowledge a reminder. Stops reminders."""
     svc = _get_service()
     try:
-        meeting = svc.acknowledge(meeting_id, body.keyword)
-    except MeetingNotFoundError:
-        raise HTTPException(status_code=404, detail="Meeting not found")
+        reminder = svc.acknowledge(reminder_id, body.keyword)
+    except ReminderNotFoundError:
+        raise HTTPException(status_code=404, detail="Reminder not found")
     except InvalidTransitionError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    return MeetingResponse.model_validate(meeting)
+    return ReminderResponse.model_validate(reminder)
 
 
-@router.post("/meetings/{meeting_id}/skip", response_model=MeetingResponse)
-async def skip_meeting(meeting_id: int) -> MeetingResponse:
-    """Skip a meeting deliberately. Stops reminders."""
+@router.post("/reminders/{reminder_id}/skip", response_model=ReminderResponse)
+async def skip_reminder(reminder_id: int) -> ReminderResponse:
+    """Skip a reminder deliberately. Stops reminders."""
     svc = _get_service()
     try:
-        meeting = svc.skip(meeting_id)
-    except MeetingNotFoundError:
-        raise HTTPException(status_code=404, detail="Meeting not found")
+        reminder = svc.skip(reminder_id)
+    except ReminderNotFoundError:
+        raise HTTPException(status_code=404, detail="Reminder not found")
     except InvalidTransitionError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    return MeetingResponse.model_validate(meeting)
+    return ReminderResponse.model_validate(reminder)
 
 
-@router.delete("/meetings/{meeting_id}", status_code=204)
-async def delete_meeting(meeting_id: int) -> None:
-    """Delete a meeting."""
+@router.delete("/reminders/{reminder_id}", status_code=204)
+async def delete_reminder(reminder_id: int) -> None:
+    """Delete a reminder."""
     svc = _get_service()
-    if not svc.delete(meeting_id):
-        raise HTTPException(status_code=404, detail="Meeting not found")
+    if not svc.delete(reminder_id):
+        raise HTTPException(status_code=404, detail="Reminder not found")
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -147,6 +147,6 @@ async def health() -> HealthResponse:
         signal_connected=signal_ok,
         db_ok=True,
         next_reminder=None,  # TODO: calculate from scheduler
-        meetings_pending=svc.count_pending(),
-        meetings_reminding=svc.count_reminding(),
+        reminders_pending=svc.count_pending(),
+        reminders_reminding=svc.count_reminding(),
     )

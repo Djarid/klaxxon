@@ -13,7 +13,7 @@
     <template x-if="!authenticated">
         <div class="login-screen">
             <h1>KLAXXON</h1>
-            <p style="color: var(--text-muted); font-size: 0.9rem;">Meeting reminder service</p>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">Reminder service</p>
 
             <div class="login-form">
                 <template x-if="error">
@@ -48,8 +48,8 @@
                         <span class="status-dot" :class="health.db_ok ? 'ok' : 'error'"></span>
                         DB
                     </span>
-                    <span x-text="health.meetings_pending + ' pending'"></span>
-                    <span x-text="health.meetings_reminding + ' reminding'"></span>
+                    <span x-text="health.reminders_pending + ' pending'"></span>
+                    <span x-text="health.reminders_reminding + ' reminding'"></span>
                     <button class="btn btn-sm" @click="logout()">Logout</button>
                 </div>
             </header>
@@ -62,10 +62,10 @@
                 <div class="alert alert-success" x-text="success"></div>
             </template>
 
-            <!-- New meeting form (collapsible) -->
+            <!-- New reminder form (collapsible) -->
             <div class="section">
                 <div class="section-header">
-                    <h2>Meetings</h2>
+                    <h2>Reminders</h2>
                     <button class="btn btn-sm btn-primary"
                             @click="showForm = !showForm"
                             x-text="showForm ? 'Cancel' : '+ New'">
@@ -77,7 +77,7 @@
                         <div class="form-group">
                             <label for="m-title">Title</label>
                             <input id="m-title" type="text" x-model="form.title"
-                                   placeholder="Economy PWG" @keydown.enter="createMeeting()">
+                                   placeholder="Economy PWG" @keydown.enter="createReminder()">
                         </div>
                         <div class="form-row">
                             <div class="form-group">
@@ -91,62 +91,62 @@
                             </div>
                         </div>
                         <div class="form-group">
-                            <label for="m-link">Meeting link (optional)</label>
+                            <label for="m-link">Link (optional)</label>
                             <input id="m-link" type="url" x-model="form.link"
                                    placeholder="https://zoom.us/j/...">
                         </div>
-                        <button class="btn btn-primary" @click="createMeeting()"
+                        <button class="btn btn-primary" @click="createReminder()"
                                 :disabled="!form.title || !form.starts_at || creating">
-                            <span x-text="creating ? 'Creating...' : 'Create meeting'"></span>
+                            <span x-text="creating ? 'Creating...' : 'Create reminder'"></span>
                         </button>
                     </div>
                 </template>
             </div>
 
-            <!-- Meeting list -->
+            <!-- Reminder list -->
             <div class="section">
-                <template x-if="meetings.length === 0">
-                    <div class="empty">No meetings. Add one above.</div>
+                <template x-if="reminders.length === 0">
+                    <div class="empty">No reminders. Add one above.</div>
                 </template>
 
-                <template x-for="m in meetings" :key="m.id">
-                    <div class="meeting-card" :class="m.state">
+                <template x-for="r in reminders" :key="r.id">
+                    <div class="reminder-card" :class="r.state">
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <span class="badge" :class="'badge-' + m.state"
-                                  x-text="m.state"></span>
-                            <span class="title" x-text="m.title"></span>
+                            <span class="badge" :class="'badge-' + r.state"
+                                  x-text="r.state"></span>
+                            <span class="title" x-text="r.title"></span>
                         </div>
 
                         <div class="meta">
-                            <span x-text="formatDate(m.starts_at)"></span>
-                            <span x-text="m.duration_min + ' min'"></span>
-                            <span x-text="'#' + m.id"></span>
-                            <span x-text="'via ' + m.source"></span>
+                            <span x-text="formatDate(r.starts_at)"></span>
+                            <span x-text="r.duration_min + ' min'"></span>
+                            <span x-text="'#' + r.id"></span>
+                            <span x-text="'via ' + r.source"></span>
                         </div>
 
-                        <template x-if="m.link">
-                            <a class="meeting-link" :href="m.link" target="_blank"
-                               rel="noopener" x-text="m.link"></a>
+                        <template x-if="r.link">
+                            <a class="reminder-link" :href="r.link" target="_blank"
+                               rel="noopener" x-text="r.link"></a>
                         </template>
 
-                        <template x-if="m.ack_keyword">
+                        <template x-if="r.ack_keyword">
                             <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
-                                Acked with "<span x-text="m.ack_keyword"></span>"
-                                at <span x-text="formatDate(m.ack_at)"></span>
+                                Acked with "<span x-text="r.ack_keyword"></span>"
+                                at <span x-text="formatDate(r.ack_at)"></span>
                             </div>
                         </template>
 
                         <div class="actions">
-                            <template x-if="m.state === 'pending' || m.state === 'reminding'">
+                            <template x-if="r.state === 'pending' || r.state === 'reminding'">
                                 <button class="btn btn-sm btn-success"
-                                        @click="ackMeeting(m.id)">Ack</button>
+                                        @click="ackReminder(r.id)">Ack</button>
                             </template>
-                            <template x-if="m.state === 'pending' || m.state === 'reminding'">
+                            <template x-if="r.state === 'pending' || r.state === 'reminding'">
                                 <button class="btn btn-sm btn-warning"
-                                        @click="skipMeeting(m.id)">Skip</button>
+                                        @click="skipReminder(r.id)">Skip</button>
                             </template>
                             <button class="btn btn-sm btn-danger"
-                                    @click="deleteMeeting(m.id)">Delete</button>
+                                    @click="deleteReminder(r.id)">Delete</button>
                         </div>
                     </div>
                 </template>
@@ -168,16 +168,16 @@ function klaxxon() {
         creating: false,
 
         /* Data */
-        meetings: [],
+        reminders: [],
         health: {
             status: 'unknown',
             signal_connected: false,
             db_ok: false,
-            meetings_pending: 0,
-            meetings_reminding: 0,
+            reminders_pending: 0,
+            reminders_reminding: 0,
         },
 
-        /* New meeting form */
+        /* New reminder form */
         form: {
             title: '',
             starts_at: '',
@@ -219,22 +219,22 @@ function klaxxon() {
         logout() {
             this.authenticated = false;
             this.token = '';
-            this.meetings = [];
+            this.reminders = [];
             localStorage.removeItem('klaxxon_token');
             this._stopPolling();
         },
 
         /* Data loading */
         async refresh() {
-            await Promise.all([this.loadMeetings(), this.loadHealth()]);
+            await Promise.all([this.loadReminders(), this.loadHealth()]);
         },
 
-        async loadMeetings() {
+        async loadReminders() {
             try {
-                const resp = await this._fetch('/api/meetings');
+                const resp = await this._fetch('/api/reminders');
                 if (resp.ok) {
                     const data = await resp.json();
-                    this.meetings = data.meetings.sort((a, b) => {
+                    this.reminders = data.reminders.sort((a, b) => {
                         const order = { reminding: 0, pending: 1, acknowledged: 2, skipped: 3, missed: 4 };
                         const stateA = order[a.state] ?? 5;
                         const stateB = order[b.state] ?? 5;
@@ -259,7 +259,7 @@ function klaxxon() {
         },
 
         /* Actions */
-        async createMeeting() {
+        async createReminder() {
             this.error = '';
             this.success = '';
             this.creating = true;
@@ -275,13 +275,13 @@ function klaxxon() {
             if (this.form.link) body.link = this.form.link;
 
             try {
-                const resp = await this._fetch('/api/meetings', {
+                const resp = await this._fetch('/api/reminders', {
                     method: 'POST',
                     body: JSON.stringify(body),
                 });
 
                 if (resp.ok) {
-                    this.success = 'Meeting created.';
+                    this.success = 'Reminder created.';
                     this.form = { title: '', starts_at: '', duration_min: 90, link: '' };
                     this.showForm = false;
                     await this.refresh();
@@ -297,16 +297,16 @@ function klaxxon() {
             }
         },
 
-        async ackMeeting(id) {
+        async ackReminder(id) {
             this.error = '';
             this.success = '';
             try {
-                const resp = await this._fetch(`/api/meetings/${id}/ack`, {
+                const resp = await this._fetch(`/api/reminders/${id}/ack`, {
                     method: 'POST',
                     body: JSON.stringify({ keyword: 'web' }),
                 });
                 if (resp.ok) {
-                    this.success = 'Meeting acknowledged.';
+                    this.success = 'Reminder acknowledged.';
                     await this.refresh();
                     this._clearAlerts();
                 } else {
@@ -318,15 +318,15 @@ function klaxxon() {
             }
         },
 
-        async skipMeeting(id) {
+        async skipReminder(id) {
             this.error = '';
             this.success = '';
             try {
-                const resp = await this._fetch(`/api/meetings/${id}/skip`, {
+                const resp = await this._fetch(`/api/reminders/${id}/skip`, {
                     method: 'POST',
                 });
                 if (resp.ok) {
-                    this.success = 'Meeting skipped.';
+                    this.success = 'Reminder skipped.';
                     await this.refresh();
                     this._clearAlerts();
                 } else {
@@ -338,15 +338,15 @@ function klaxxon() {
             }
         },
 
-        async deleteMeeting(id) {
+        async deleteReminder(id) {
             this.error = '';
             this.success = '';
             try {
-                const resp = await this._fetch(`/api/meetings/${id}`, {
+                const resp = await this._fetch(`/api/reminders/${id}`, {
                     method: 'DELETE',
                 });
                 if (resp.ok) {
-                    this.success = 'Meeting deleted.';
+                    this.success = 'Reminder deleted.';
                     await this.refresh();
                     this._clearAlerts();
                 } else {

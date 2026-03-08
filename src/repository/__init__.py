@@ -1,4 +1,4 @@
-from .base import MeetingRepository
-from .sqlite import SqliteMeetingRepository
+from .base import ReminderRepository
+from .sqlite import SqliteReminderRepository
 
-__all__ = ["MeetingRepository", "SqliteMeetingRepository"]
+__all__ = ["ReminderRepository", "SqliteReminderRepository"]

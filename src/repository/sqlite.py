@@ -1,4 +1,4 @@
-"""SQLite implementation of the MeetingRepository.
+"""SQLite implementation of the ReminderRepository.
 
 Single-file database, no external dependencies.
 Schema is created on first connection if tables don't exist.
@@ -11,11 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from ..models.meeting import Meeting, MeetingState
-from .base import MeetingRepository
+from ..models.reminder import Reminder, ReminderState
+from .base import ReminderRepository
 
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS meetings (
+CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     starts_at TEXT NOT NULL,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS meetings (
 
 CREATE TABLE IF NOT EXISTS reminder_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    reminder_id INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
     sent_at TEXT NOT NULL,
     message TEXT NOT NULL,
     channel TEXT NOT NULL DEFAULT 'signal'
@@ -46,9 +46,9 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE INDEX IF NOT EXISTS idx_meetings_state ON meetings(state);
-CREATE INDEX IF NOT EXISTS idx_meetings_starts_at ON meetings(starts_at);
-CREATE INDEX IF NOT EXISTS idx_reminder_log_meeting ON reminder_log(meeting_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_state ON reminders(state);
+CREATE INDEX IF NOT EXISTS idx_reminders_starts_at ON reminders(starts_at);
+CREATE INDEX IF NOT EXISTS idx_reminder_log_reminder ON reminder_log(reminder_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_hash ON auth_tokens(token_hash);
 """
 
@@ -63,15 +63,15 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(value)
 
 
-def _row_to_meeting(row: sqlite3.Row) -> Meeting:
-    return Meeting(
+def _row_to_reminder(row: sqlite3.Row) -> Reminder:
+    return Reminder(
         id=row["id"],
         title=row["title"],
         starts_at=_parse_dt(row["starts_at"]),
         duration_min=row["duration_min"],
         link=row["link"],
         source=row["source"],
-        state=MeetingState(row["state"]),
+        state=ReminderState(row["state"]),
         ack_keyword=row["ack_keyword"],
         ack_at=_parse_dt(row["ack_at"]),
         created_at=_parse_dt(row["created_at"]),
@@ -79,8 +79,8 @@ def _row_to_meeting(row: sqlite3.Row) -> Meeting:
     )
 
 
-class SqliteMeetingRepository(MeetingRepository):
-    """SQLite-backed meeting storage."""
+class SqliteReminderRepository(ReminderRepository):
+    """SQLite-backed reminder storage."""
 
     def __init__(self, db_path: str | Path = ":memory:") -> None:
         self._db_path = str(db_path)
@@ -100,58 +100,58 @@ class SqliteMeetingRepository(MeetingRepository):
         conn.executescript(_SCHEMA)
         conn.commit()
 
-    def create(self, meeting: Meeting) -> Meeting:
+    def create(self, reminder: Reminder) -> Reminder:
         now = _now_utc()
         conn = self._get_conn()
         cursor = conn.execute(
-            """INSERT INTO meetings
+            """INSERT INTO reminders
             (title, starts_at, duration_min, link, source, state, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                meeting.title,
-                meeting.starts_at.isoformat() if meeting.starts_at else now,
-                meeting.duration_min,
-                meeting.link,
-                meeting.source,
-                meeting.state.value,
+                reminder.title,
+                reminder.starts_at.isoformat() if reminder.starts_at else now,
+                reminder.duration_min,
+                reminder.link,
+                reminder.source,
+                reminder.state.value,
                 now,
                 now,
             ),
         )
         conn.commit()
-        meeting.id = cursor.lastrowid
-        meeting.created_at = _parse_dt(now)
-        meeting.updated_at = _parse_dt(now)
-        return meeting
+        reminder.id = cursor.lastrowid
+        reminder.created_at = _parse_dt(now)
+        reminder.updated_at = _parse_dt(now)
+        return reminder
 
-    def get(self, meeting_id: int) -> Optional[Meeting]:
+    def get(self, reminder_id: int) -> Optional[Reminder]:
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT * FROM meetings WHERE id = ?", (meeting_id,)
+            "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
         ).fetchone()
         if row is None:
             return None
-        return _row_to_meeting(row)
+        return _row_to_reminder(row)
 
     def list_all(
         self,
-        state: Optional[MeetingState] = None,
-    ) -> list[Meeting]:
+        state: Optional[ReminderState] = None,
+    ) -> list[Reminder]:
         conn = self._get_conn()
         if state is not None:
             rows = conn.execute(
-                "SELECT * FROM meetings WHERE state = ? ORDER BY starts_at",
+                "SELECT * FROM reminders WHERE state = ? ORDER BY starts_at",
                 (state.value,),
             ).fetchall()
         else:
-            rows = conn.execute("SELECT * FROM meetings ORDER BY starts_at").fetchall()
-        return [_row_to_meeting(r) for r in rows]
+            rows = conn.execute("SELECT * FROM reminders ORDER BY starts_at").fetchall()
+        return [_row_to_reminder(r) for r in rows]
 
     def list_upcoming(
         self,
         before: Optional[datetime] = None,
-        states: Optional[list[MeetingState]] = None,
-    ) -> list[Meeting]:
+        states: Optional[list[ReminderState]] = None,
+    ) -> list[Reminder]:
         conn = self._get_conn()
         now = _now_utc()
         conditions = []
@@ -171,22 +171,22 @@ class SqliteMeetingRepository(MeetingRepository):
             where = "WHERE " + " AND ".join(conditions)
 
         rows = conn.execute(
-            f"SELECT * FROM meetings {where} ORDER BY starts_at",
+            f"SELECT * FROM reminders {where} ORDER BY starts_at",
             params,
         ).fetchall()
-        return [_row_to_meeting(r) for r in rows]
+        return [_row_to_reminder(r) for r in rows]
 
     def update_state(
         self,
-        meeting_id: int,
-        state: MeetingState,
+        reminder_id: int,
+        state: ReminderState,
         ack_keyword: Optional[str] = None,
         ack_at: Optional[datetime] = None,
-    ) -> Optional[Meeting]:
+    ) -> Optional[Reminder]:
         now = _now_utc()
         conn = self._get_conn()
         conn.execute(
-            """UPDATE meetings
+            """UPDATE reminders
             SET state = ?, ack_keyword = ?, ack_at = ?, updated_at = ?
             WHERE id = ?""",
             (
@@ -194,48 +194,48 @@ class SqliteMeetingRepository(MeetingRepository):
                 ack_keyword,
                 ack_at.isoformat() if ack_at else None,
                 now,
-                meeting_id,
+                reminder_id,
             ),
         )
         conn.commit()
-        return self.get(meeting_id)
+        return self.get(reminder_id)
 
-    def delete(self, meeting_id: int) -> bool:
+    def delete(self, reminder_id: int) -> bool:
         conn = self._get_conn()
-        cursor = conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+        cursor = conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
         conn.commit()
         return cursor.rowcount > 0
 
-    def count_by_state(self, state: MeetingState) -> int:
+    def count_by_state(self, state: ReminderState) -> int:
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM meetings WHERE state = ?",
+            "SELECT COUNT(*) AS cnt FROM reminders WHERE state = ?",
             (state.value,),
         ).fetchone()
         return row["cnt"] if row else 0
 
     def log_reminder(
         self,
-        meeting_id: int,
+        reminder_id: int,
         message: str,
         channel: str = "signal",
     ) -> None:
         """Log a sent reminder (not part of the ABC, SQLite-specific)."""
         conn = self._get_conn()
         conn.execute(
-            """INSERT INTO reminder_log (meeting_id, sent_at, message, channel)
+            """INSERT INTO reminder_log (reminder_id, sent_at, message, channel)
             VALUES (?, ?, ?, ?)""",
-            (meeting_id, _now_utc(), message, channel),
+            (reminder_id, _now_utc(), message, channel),
         )
         conn.commit()
 
-    def get_last_reminder_time(self, meeting_id: int) -> Optional[datetime]:
-        """Get the timestamp of the last reminder sent for a meeting."""
+    def get_last_reminder_time(self, reminder_id: int) -> Optional[datetime]:
+        """Get the timestamp of the last reminder sent for a reminder."""
         conn = self._get_conn()
         row = conn.execute(
             """SELECT sent_at FROM reminder_log
-            WHERE meeting_id = ? ORDER BY sent_at DESC LIMIT 1""",
-            (meeting_id,),
+            WHERE reminder_id = ? ORDER BY sent_at DESC LIMIT 1""",
+            (reminder_id,),
         ).fetchone()
         if row is None:
             return None

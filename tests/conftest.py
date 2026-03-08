@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.models.meeting import Meeting, MeetingState
-from src.repository.sqlite import SqliteMeetingRepository
-from src.services.meeting_service import MeetingService
+from src.models.reminder import Reminder, ReminderState
+from src.repository.sqlite import SqliteReminderRepository
+from src.services.reminder_service import ReminderService
 from src.services.notification.base import (
     IncomingMessage,
     MessageReceiver,
@@ -45,15 +45,15 @@ class FailingSender(MessageSender):
 
 
 @pytest.fixture
-def repo() -> SqliteMeetingRepository:
+def repo() -> SqliteReminderRepository:
     """In-memory SQLite repository."""
-    return SqliteMeetingRepository(":memory:")
+    return SqliteReminderRepository(":memory:")
 
 
 @pytest.fixture
-def service(repo: SqliteMeetingRepository) -> MeetingService:
-    """Meeting service with in-memory repo."""
-    return MeetingService(repo)
+def service(repo: SqliteReminderRepository) -> ReminderService:
+    """Reminder service with in-memory repo."""
+    return ReminderService(repo)
 
 
 @pytest.fixture

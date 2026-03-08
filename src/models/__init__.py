@@ -1,3 +1,3 @@
-from .meeting import Meeting, MeetingState
+from .reminder import Reminder, ReminderState
 
-__all__ = ["Meeting", "MeetingState"]
+__all__ = ["Reminder", "ReminderState"]

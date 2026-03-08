@@ -17,8 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from .api import routes
 from .api.auth import register_token
 from .config import AppConfig, load_config
-from .repository.sqlite import SqliteMeetingRepository
-from .services.meeting_service import MeetingService
+from .repository.sqlite import SqliteReminderRepository
+from .services.reminder_service import ReminderService
 from .services.notification.signal_client import SignalClient
 from .services.reminder_engine import ReminderEngine
 from .signal_handler import SignalHandler
@@ -63,12 +63,12 @@ async def lifespan(app: FastAPI):
     _config = load_config(config_path)
 
     # Wire up concretions (Dependency Inversion: only here)
-    repo = SqliteMeetingRepository(_config.db_path)
+    repo = SqliteReminderRepository(_config.db_path)
     signal_client = SignalClient(
         api_url=_config.signal_api_url,
         account=_config.signal_account,
     )
-    service = MeetingService(repo)
+    service = ReminderService(repo)
 
     _reminder_engine = ReminderEngine(
         service=service,
@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Klaxxon",
-    description="ADHD meeting reminder with escalating Signal notifications",
+    description="ADHD reminder system with escalating Signal notifications",
     version="0.1.0",
     lifespan=lifespan,
 )

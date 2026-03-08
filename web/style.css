@@ -182,8 +182,8 @@ label {
     gap: 1rem;
 }
 
-/* Cards / meeting list */
-.meeting-card {
+/* Cards / reminder list */
+.reminder-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -192,17 +192,17 @@ label {
     transition: border-color 0.15s;
 }
 
-.meeting-card:hover {
+.reminder-card:hover {
     border-color: var(--accent);
 }
 
-.meeting-card .title {
+.reminder-card .title {
     font-size: 1rem;
     font-weight: 600;
     margin-bottom: 0.25rem;
 }
 
-.meeting-card .meta {
+.reminder-card .meta {
     font-size: 0.8rem;
     color: var(--text-muted);
     display: flex;
@@ -211,7 +211,7 @@ label {
     margin-bottom: 0.5rem;
 }
 
-.meeting-card .actions {
+.reminder-card .actions {
     display: flex;
     gap: 0.5rem;
     margin-top: 0.5rem;
@@ -235,14 +235,14 @@ label {
 .badge-missed { background: var(--missed); color: var(--bg); }
 
 /* Link */
-.meeting-link {
+.reminder-link {
     font-size: 0.8rem;
     color: var(--accent);
     text-decoration: none;
     word-break: break-all;
 }
 
-.meeting-link:hover {
+.reminder-link:hover {
     text-decoration: underline;
 }
 
@@ -326,7 +326,7 @@ label {
         grid-template-columns: 1fr;
     }
 
-    .meeting-card .actions {
+    .reminder-card .actions {
         flex-wrap: wrap;
     }
 
@@ -343,7 +343,7 @@ label {
     50% { border-color: transparent; }
 }
 
-.meeting-card.reminding {
+.reminder-card.reminding {
     animation: pulse 2s ease-in-out infinite;
     border-color: var(--warning);
 }

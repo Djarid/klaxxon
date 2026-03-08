@@ -7,11 +7,11 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from .meeting import MeetingState
+from .reminder import ReminderState
 
 
-class MeetingCreate(BaseModel):
-    """Request body for creating a meeting."""
+class ReminderCreate(BaseModel):
+    """Request body for creating a reminder."""
 
     title: str = Field(..., min_length=1, max_length=500)
     starts_at: datetime
@@ -20,8 +20,8 @@ class MeetingCreate(BaseModel):
     source: str = Field(default="api", max_length=50)
 
 
-class MeetingResponse(BaseModel):
-    """Response body for a meeting."""
+class ReminderResponse(BaseModel):
+    """Response body for a reminder."""
 
     id: int
     title: str
@@ -29,7 +29,7 @@ class MeetingResponse(BaseModel):
     duration_min: int
     link: Optional[str]
     source: str
-    state: MeetingState
+    state: ReminderState
     ack_keyword: Optional[str]
     ack_at: Optional[datetime]
     created_at: datetime
@@ -38,15 +38,15 @@ class MeetingResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class MeetingListResponse(BaseModel):
-    """Response body for listing meetings."""
+class ReminderListResponse(BaseModel):
+    """Response body for listing reminders."""
 
-    meetings: list[MeetingResponse]
+    reminders: list[ReminderResponse]
     count: int
 
 
 class AckRequest(BaseModel):
-    """Request body for acknowledging a meeting."""
+    """Request body for acknowledging a reminder."""
 
     keyword: str = Field(default="ack", max_length=50)
 
@@ -58,5 +58,5 @@ class HealthResponse(BaseModel):
     signal_connected: bool
     db_ok: bool
     next_reminder: Optional[datetime]
-    meetings_pending: int
-    meetings_reminding: int
+    reminders_pending: int
+    reminders_reminding: int

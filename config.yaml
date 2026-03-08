@@ -1,9 +1,9 @@
-# Klaxxon Meeting Reminder Configuration
+# Klaxxon Reminder Configuration
 
 timezone: "Europe/London"
 
-# Escalation pattern for meeting reminders.
-# offset_hours: time relative to meeting start (negative = before)
+# Escalation pattern for reminders.
+# offset_hours: time relative to reminder start (negative = before)
 # interval_min: null for single ping, number for repeating
 # message: template with {title}, {time}, {link}, {mins_until}, {mins_ago}
 escalation:
@@ -28,9 +28,9 @@ escalation:
       interval_min: 1
       message: "JOIN NOW: {title}. {link}"
 
-  # After meeting start time, keep pinging until ack or timeout
+  # After reminder start time, keep pinging until ack or timeout
   post_start_interval_min: 2
-  post_start_message: "MEETING STARTED {mins_ago} min ago: {title}. {link}"
+  post_start_message: "REMINDER STARTED {mins_ago} min ago: {title}. {link}"
   timeout_after_min: 90
 
 # Scheduler

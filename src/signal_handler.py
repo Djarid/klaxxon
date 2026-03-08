@@ -1,6 +1,6 @@
 """Signal incoming message handler.
 
-Parses Signal messages and delegates to MeetingService (DRY).
+Parses Signal messages and delegates to ReminderService (DRY).
 Single Responsibility: parses text commands, delegates to service layer.
 """
 
@@ -9,10 +9,10 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from .models.meeting import Meeting, MeetingState
-from .services.meeting_service import (
-    MeetingNotFoundError,
-    MeetingService,
+from .models.reminder import Reminder, ReminderState
+from .services.reminder_service import (
+    ReminderNotFoundError,
+    ReminderService,
 )
 from .services.notification.base import MessageReceiver, MessageSender
 from .services.state_machine import InvalidTransitionError
@@ -25,7 +25,7 @@ class SignalHandler:
 
     def __init__(
         self,
-        service: MeetingService,
+        service: ReminderService,
         receiver: MessageReceiver,
         sender: MessageSender,
         owner_number: str,
@@ -73,65 +73,65 @@ class SignalHandler:
             logger.debug("Unrecognised Signal command: %s", body_lower)
 
     async def _handle_ack(self, keyword: str) -> None:
-        """Acknowledge the most recent reminding meeting."""
-        meeting = self._find_active_meeting()
-        if meeting is None:
+        """Acknowledge the most recent reminding reminder."""
+        reminder = self._find_active_reminder()
+        if reminder is None:
             await self._sender.send_message(
-                self._owner, "No active meeting to acknowledge."
+                self._owner, "No active reminder to acknowledge."
             )
             return
 
         try:
-            self._service.acknowledge(meeting.id, keyword)  # type: ignore
+            self._service.acknowledge(reminder.id, keyword)  # type: ignore
             await self._sender.send_message(
                 self._owner,
-                f"Acknowledged: {meeting.title}. Reminders stopped.",
+                f"Acknowledged: {reminder.title}. Reminders stopped.",
             )
         except InvalidTransitionError:
             await self._sender.send_message(
                 self._owner,
-                f"Cannot acknowledge {meeting.title} (state: {meeting.state.value}).",
+                f"Cannot acknowledge {reminder.title} (state: {reminder.state.value}).",
             )
 
     async def _handle_skip(self) -> None:
-        """Skip the most recent reminding meeting."""
-        meeting = self._find_active_meeting()
-        if meeting is None:
-            await self._sender.send_message(self._owner, "No active meeting to skip.")
+        """Skip the most recent reminding reminder."""
+        reminder = self._find_active_reminder()
+        if reminder is None:
+            await self._sender.send_message(self._owner, "No active reminder to skip.")
             return
 
         try:
-            self._service.skip(meeting.id)  # type: ignore
+            self._service.skip(reminder.id)  # type: ignore
             await self._sender.send_message(
                 self._owner,
-                f"Skipped: {meeting.title}. Reminders stopped.",
+                f"Skipped: {reminder.title}. Reminders stopped.",
             )
         except InvalidTransitionError:
             await self._sender.send_message(
                 self._owner,
-                f"Cannot skip {meeting.title} (state: {meeting.state.value}).",
+                f"Cannot skip {reminder.title} (state: {reminder.state.value}).",
             )
 
     async def _handle_list(self) -> None:
-        """List upcoming meetings."""
-        meetings = self._service.list_meetings()
+        """List upcoming reminders."""
+        reminders = self._service.list_reminders()
         active = [
-            m
-            for m in meetings
-            if m.state in (MeetingState.PENDING, MeetingState.REMINDING)
+            r
+            for r in reminders
+            if r.state in (ReminderState.PENDING, ReminderState.REMINDING)
         ]
 
         if not active:
-            await self._sender.send_message(self._owner, "No upcoming meetings.")
+            await self._sender.send_message(self._owner, "No upcoming reminders.")
             return
 
         lines = []
-        for m in active:
-            time_str = m.starts_at.strftime("%d %b %H:%M") if m.starts_at else "?"
-            lines.append(f"[{m.id}] {m.title} - {time_str} ({m.state.value})")
+        for r in active:
+            time_str = r.starts_at.strftime("%d %b %H:%M") if r.starts_at else "?"
+            lines.append(f"[{r.id}] {r.title} - {time_str} ({r.state.value})")
 
         await self._sender.send_message(
-            self._owner, "Upcoming meetings:\n" + "\n".join(lines)
+            self._owner, "Upcoming reminders:\n" + "\n".join(lines)
         )
 
     async def _handle_help(self) -> None:
@@ -139,19 +139,19 @@ class SignalHandler:
         await self._sender.send_message(
             self._owner,
             "Klaxxon commands:\n"
-            "  ack / joining - acknowledge active meeting\n"
-            "  skip - skip active meeting\n"
-            "  list / meetings - show upcoming\n"
+            "  ack / joining - acknowledge active reminder\n"
+            "  skip - skip active reminder\n"
+            "  list / reminders - show upcoming\n"
             "  help - this message",
         )
 
-    def _find_active_meeting(self) -> Optional[Meeting]:
-        """Find the most recently reminding meeting, or most recent pending."""
-        reminding = self._service.list_meetings(state=MeetingState.REMINDING)
+    def _find_active_reminder(self) -> Optional[Reminder]:
+        """Find the most recently reminding reminder, or most recent pending."""
+        reminding = self._service.list_reminders(state=ReminderState.REMINDING)
         if reminding:
             return reminding[0]  # Most urgent (earliest starts_at)
 
-        pending = self._service.list_meetings(state=MeetingState.PENDING)
+        pending = self._service.list_reminders(state=ReminderState.PENDING)
         if pending:
             return pending[0]
 
