@@ -21,19 +21,13 @@
                 </template>
 
                 <div class="form-group">
-                    <label for="api-url">API URL</label>
-                    <input id="api-url" type="url" x-model="apiUrl"
-                           placeholder="https://klaxxon-api.local:8443"
-                           @keydown.enter="login()">
-                </div>
-                <div class="form-group">
                     <label for="token">Bearer token</label>
                     <input id="token" type="password" x-model="token"
                            placeholder="Paste your API token"
                            @keydown.enter="login()">
                 </div>
                 <button class="btn btn-primary" style="width:100%"
-                        @click="login()" :disabled="!token || !apiUrl">
+                        @click="login()" :disabled="!token">
                     Connect
                 </button>
             </div>
@@ -165,7 +159,6 @@ function klaxxon() {
     return {
         /* Auth state */
         authenticated: false,
-        apiUrl: localStorage.getItem('klaxxon_api_url') || '',
         token: localStorage.getItem('klaxxon_token') || '',
 
         /* UI state */
@@ -196,7 +189,7 @@ function klaxxon() {
         _pollInterval: null,
 
         init() {
-            if (this.token && this.apiUrl) {
+            if (this.token) {
                 this.authenticated = true;
                 this.refresh();
                 this._startPolling();
@@ -210,7 +203,6 @@ function klaxxon() {
                 const resp = await this._fetch('/api/health');
                 if (resp.ok) {
                     localStorage.setItem('klaxxon_token', this.token);
-                    localStorage.setItem('klaxxon_api_url', this.apiUrl);
                     this.authenticated = true;
                     this.refresh();
                     this._startPolling();
@@ -229,7 +221,6 @@ function klaxxon() {
             this.token = '';
             this.meetings = [];
             localStorage.removeItem('klaxxon_token');
-            localStorage.removeItem('klaxxon_api_url');
             this._stopPolling();
         },
 
@@ -381,8 +372,7 @@ function klaxxon() {
         },
 
         _fetch(path, opts = {}) {
-            const url = this.apiUrl.replace(/\/$/, '') + path;
-            return fetch(url, {
+            return fetch(path, {
                 ...opts,
                 headers: {
                     'Authorization': `Bearer ${this.token}`,
