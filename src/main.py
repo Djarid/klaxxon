@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from .api import routes
 from .api.auth import register_token
@@ -124,3 +125,8 @@ app = FastAPI(
 )
 
 app.include_router(routes.router)
+
+# Serve SPA static files (web/ directory alongside src/)
+_web_dir = Path(__file__).resolve().parent.parent / "web"
+if _web_dir.is_dir():
+    app.mount("/", StaticFiles(directory=str(_web_dir), html=True), name="static")

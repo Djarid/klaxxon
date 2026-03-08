@@ -18,9 +18,9 @@ set -euo pipefail
 PVE_HOST="pve1"
 CTID=111
 HOSTNAME="klaxxon-api"
-IP="10.10.10.11/24"
-GW="10.10.10.1"
-TEMPLATE="local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+IP="192.168.1.11/24"
+GW="192.168.1.1"
+TEMPLATE="local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 MEMORY=512
 SWAP=256
 DISK="local-lvm:4"
@@ -47,16 +47,16 @@ echo "=== Setting up Klaxxon API LXC ($HOSTNAME, $IP) ==="
 
 # --- Create LXC on pve1 ---
 echo "Creating LXC $CTID on $PVE_HOST..."
-ssh root@"$PVE_HOST" bash -s <<PVEOF
+ssh "$PVE_HOST" bash -s <<PVEOF
 set -euo pipefail
 
-if pct status $CTID &>/dev/null; then
+if sudo pct status $CTID &>/dev/null; then
     echo "  LXC $CTID exists, destroying..."
-    pct stop $CTID 2>/dev/null || true
-    pct destroy $CTID --purge
+    sudo pct stop $CTID 2>/dev/null || true
+    sudo pct destroy $CTID --purge
 fi
 
-pct create $CTID $TEMPLATE \
+sudo pct create $CTID $TEMPLATE \
     --hostname $HOSTNAME \
     --memory $MEMORY \
     --swap $SWAP \
@@ -74,17 +74,17 @@ PVEOF
 
 # --- Copy certs ---
 echo "Copying certs..."
-ssh root@"$PVE_HOST" "pct exec $CTID -- mkdir -p /etc/klaxxon/certs"
+ssh "$PVE_HOST" "sudo pct exec $CTID -- mkdir -p /etc/klaxxon/certs"
 for f in ca.crt api.crt api.key; do
-    ssh root@"$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$CERT_DIR/$f"
-    ssh root@"$PVE_HOST" "pct push $CTID /tmp/klaxxon_$f /etc/klaxxon/certs/$f"
-    ssh root@"$PVE_HOST" "rm /tmp/klaxxon_$f"
+    ssh "$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$CERT_DIR/$f"
+    ssh "$PVE_HOST" "sudo pct push $CTID /tmp/klaxxon_$f /etc/klaxxon/certs/$f"
+    ssh "$PVE_HOST" "rm /tmp/klaxxon_$f"
 done
-ssh root@"$PVE_HOST" "pct exec $CTID -- chmod 600 /etc/klaxxon/certs/*.key"
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -c 'chmod 600 /etc/klaxxon/certs/*.key && chown klaxxon:klaxxon /etc/klaxxon/certs/*.key'"
 
 # --- Install Python and deploy app ---
 echo "Installing Python and deploying app..."
-ssh root@"$PVE_HOST" "pct exec $CTID -- bash -s" <<'LXCEOF'
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -s" <<'LXCEOF'
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -109,13 +109,13 @@ tar -czf "$TMPTAR" -C "$REPO_DIR" \
     src/ config.yaml requirements.txt .env 2>/dev/null
 
 # Push tarball to LXC
-scp "$TMPTAR" root@"$PVE_HOST":/tmp/klaxxon-deploy.tar.gz
-ssh root@"$PVE_HOST" "pct push $CTID /tmp/klaxxon-deploy.tar.gz /opt/klaxxon/deploy.tar.gz"
-ssh root@"$PVE_HOST" "rm /tmp/klaxxon-deploy.tar.gz"
+scp "$TMPTAR" "$PVE_HOST":/tmp/klaxxon-deploy.tar.gz
+ssh "$PVE_HOST" "sudo pct push $CTID /tmp/klaxxon-deploy.tar.gz /opt/klaxxon/deploy.tar.gz"
+ssh "$PVE_HOST" "rm /tmp/klaxxon-deploy.tar.gz"
 rm -f "$TMPTAR"
 
 # Extract and set up venv
-ssh root@"$PVE_HOST" "pct exec $CTID -- bash -s" <<'LXCEOF'
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -s" <<'LXCEOF'
 set -euo pipefail
 
 cd /opt/klaxxon
@@ -128,7 +128,7 @@ sed -i 's|TLS_CERT_PATH=.*|TLS_CERT_PATH=/etc/klaxxon/certs/api.crt|' .env
 sed -i 's|TLS_KEY_PATH=.*|TLS_KEY_PATH=/etc/klaxxon/certs/api.key|' .env
 
 # Point Signal API at comms LXC
-sed -i 's|SIGNAL_API_URL=.*|SIGNAL_API_URL=http://10.10.10.10:8082|' .env
+sed -i 's|SIGNAL_API_URL=.*|SIGNAL_API_URL=http://192.168.1.10:8082|' .env
 
 # Create venv and install deps
 python3 -m venv /opt/klaxxon/.venv
@@ -172,4 +172,4 @@ LXCEOF
 echo ""
 echo "=== API LXC ($HOSTNAME) provisioned ==="
 echo "API running on https://$IP:8443"
-echo "Health check: curl -k -H 'Authorization: Bearer <token>' https://10.10.10.11:8443/api/health"
+echo "Health check: curl -k -H 'Authorization: Bearer <token>' https://192.168.1.11:8443/api/health"

@@ -17,9 +17,9 @@ KEY_BITS=4096
 # Subnet and hostnames
 declare -A HOSTS=(
     [ca]="Klaxxon CA"
-    [comms]="10.10.10.10"
-    [api]="10.10.10.11"
-    [web]="10.10.10.12"
+    [comms]="192.168.1.10"
+    [api]="192.168.1.11"
+    [web]="192.168.1.12"
 )
 
 mkdir -p "$CERT_DIR"

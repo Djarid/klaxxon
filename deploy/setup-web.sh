@@ -17,9 +17,9 @@ set -euo pipefail
 PVE_HOST="pve1"
 CTID=112
 HOSTNAME="klaxxon-web"
-IP="10.10.10.12/24"
-GW="10.10.10.1"
-TEMPLATE="local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+IP="192.168.1.12/24"
+GW="192.168.1.1"
+TEMPLATE="local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 MEMORY=256
 SWAP=128
 DISK="local-lvm:2"
@@ -41,16 +41,16 @@ echo "=== Setting up Klaxxon web LXC ($HOSTNAME, $IP) ==="
 
 # --- Create LXC on pve1 ---
 echo "Creating LXC $CTID on $PVE_HOST..."
-ssh root@"$PVE_HOST" bash -s <<PVEOF
+ssh "$PVE_HOST" bash -s <<PVEOF
 set -euo pipefail
 
-if pct status $CTID &>/dev/null; then
+if sudo pct status $CTID &>/dev/null; then
     echo "  LXC $CTID exists, destroying..."
-    pct stop $CTID 2>/dev/null || true
-    pct destroy $CTID --purge
+    sudo pct stop $CTID 2>/dev/null || true
+    sudo pct destroy $CTID --purge
 fi
 
-pct create $CTID $TEMPLATE \
+sudo pct create $CTID $TEMPLATE \
     --hostname $HOSTNAME \
     --memory $MEMORY \
     --swap $SWAP \
@@ -68,17 +68,17 @@ PVEOF
 
 # --- Copy certs ---
 echo "Copying certs..."
-ssh root@"$PVE_HOST" "pct exec $CTID -- mkdir -p /etc/klaxxon/certs"
+ssh "$PVE_HOST" "sudo pct exec $CTID -- mkdir -p /etc/klaxxon/certs"
 for f in ca.crt web.crt web.key; do
-    ssh root@"$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$CERT_DIR/$f"
-    ssh root@"$PVE_HOST" "pct push $CTID /tmp/klaxxon_$f /etc/klaxxon/certs/$f"
-    ssh root@"$PVE_HOST" "rm /tmp/klaxxon_$f"
+    ssh "$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$CERT_DIR/$f"
+    ssh "$PVE_HOST" "sudo pct push $CTID /tmp/klaxxon_$f /etc/klaxxon/certs/$f"
+    ssh "$PVE_HOST" "rm /tmp/klaxxon_$f"
 done
-ssh root@"$PVE_HOST" "pct exec $CTID -- chmod 600 /etc/klaxxon/certs/*.key"
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -c 'chmod 600 /etc/klaxxon/certs/*.key'"
 
 # --- Install Caddy and deploy SPA ---
 echo "Installing Caddy and deploying SPA..."
-ssh root@"$PVE_HOST" "pct exec $CTID -- bash -s" <<'LXCEOF'
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -s" <<'LXCEOF'
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -106,18 +106,18 @@ LXCEOF
 # --- Copy SPA files ---
 echo "Deploying SPA files..."
 for f in index.html style.css; do
-    ssh root@"$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$REPO_DIR/web/$f"
-    ssh root@"$PVE_HOST" "pct push $CTID /tmp/klaxxon_$f /srv/klaxxon/web/$f"
-    ssh root@"$PVE_HOST" "rm /tmp/klaxxon_$f"
+    ssh "$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$REPO_DIR/web/$f"
+    ssh "$PVE_HOST" "sudo pct push $CTID /tmp/klaxxon_$f /srv/klaxxon/web/$f"
+    ssh "$PVE_HOST" "rm /tmp/klaxxon_$f"
 done
 
 # Copy Caddyfile
-ssh root@"$PVE_HOST" "cat > /tmp/klaxxon_Caddyfile" < "$REPO_DIR/web/Caddyfile"
-ssh root@"$PVE_HOST" "pct push $CTID /tmp/klaxxon_Caddyfile /etc/caddy/Caddyfile"
-ssh root@"$PVE_HOST" "rm /tmp/klaxxon_Caddyfile"
+ssh "$PVE_HOST" "cat > /tmp/klaxxon_Caddyfile" < "$REPO_DIR/web/Caddyfile"
+ssh "$PVE_HOST" "sudo pct push $CTID /tmp/klaxxon_Caddyfile /etc/caddy/Caddyfile"
+ssh "$PVE_HOST" "rm /tmp/klaxxon_Caddyfile"
 
 # --- Start Caddy ---
-ssh root@"$PVE_HOST" "pct exec $CTID -- bash -s" <<'LXCEOF'
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -s" <<'LXCEOF'
 set -euo pipefail
 
 # Validate Caddyfile
@@ -137,5 +137,5 @@ LXCEOF
 
 echo ""
 echo "=== Web LXC ($HOSTNAME) provisioned ==="
-echo "SPA available at: https://10.10.10.12/"
-echo "API proxied through: https://10.10.10.12/api/*"
+echo "SPA available at: https://192.168.1.12/"
+echo "API proxied through: https://192.168.1.12/api/*"

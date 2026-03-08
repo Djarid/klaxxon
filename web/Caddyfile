@@ -17,7 +17,7 @@
 
     # Proxy API requests to the API LXC
     handle /api/* {
-        reverse_proxy https://10.10.10.11:8443 {
+        reverse_proxy https://192.168.1.11:8443 {
             transport http {
                 tls_client_auth /etc/klaxxon/certs/web.crt /etc/klaxxon/certs/web.key
                 tls_trusted_ca_certs /etc/klaxxon/certs/ca.crt

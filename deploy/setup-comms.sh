@@ -18,9 +18,9 @@ set -euo pipefail
 PVE_HOST="pve1"
 CTID=110
 HOSTNAME="klaxxon-comms"
-IP="10.10.10.10/24"
-GW="10.10.10.1"
-TEMPLATE="local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+IP="192.168.1.10/24"
+GW="192.168.1.1"
+TEMPLATE="local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 MEMORY=512
 SWAP=256
 DISK="local-lvm:4"
@@ -42,17 +42,17 @@ echo "=== Setting up Klaxxon comms LXC ($HOSTNAME, $IP) ==="
 
 # --- Create LXC on pve1 ---
 echo "Creating LXC $CTID on $PVE_HOST..."
-ssh root@"$PVE_HOST" bash -s <<PVEOF
+ssh "$PVE_HOST" bash -s <<PVEOF
 set -euo pipefail
 
 # Destroy existing if present
-if pct status $CTID &>/dev/null; then
+if sudo pct status $CTID &>/dev/null; then
     echo "  LXC $CTID exists, destroying..."
-    pct stop $CTID 2>/dev/null || true
-    pct destroy $CTID --purge
+    sudo pct stop $CTID 2>/dev/null || true
+    sudo pct destroy $CTID --purge
 fi
 
-pct create $CTID $TEMPLATE \
+sudo pct create $CTID $TEMPLATE \
     --hostname $HOSTNAME \
     --memory $MEMORY \
     --swap $SWAP \
@@ -72,17 +72,17 @@ PVEOF
 
 # --- Copy certs to LXC ---
 echo "Copying certs to LXC..."
-ssh root@"$PVE_HOST" "pct exec $CTID -- mkdir -p /etc/klaxxon/certs"
+ssh "$PVE_HOST" "sudo pct exec $CTID -- mkdir -p /etc/klaxxon/certs"
 for f in ca.crt comms.crt comms.key; do
-    ssh root@"$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$CERT_DIR/$f"
-    ssh root@"$PVE_HOST" "pct push $CTID /tmp/klaxxon_$f /etc/klaxxon/certs/$f"
-    ssh root@"$PVE_HOST" "rm /tmp/klaxxon_$f"
+    ssh "$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$CERT_DIR/$f"
+    ssh "$PVE_HOST" "sudo pct push $CTID /tmp/klaxxon_$f /etc/klaxxon/certs/$f"
+    ssh "$PVE_HOST" "rm /tmp/klaxxon_$f"
 done
-ssh root@"$PVE_HOST" "pct exec $CTID -- chmod 600 /etc/klaxxon/certs/*.key"
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -c 'chmod 600 /etc/klaxxon/certs/*.key'"
 
 # --- Install signal-cli REST API inside LXC ---
 echo "Installing signal-cli REST API..."
-ssh root@"$PVE_HOST" "pct exec $CTID -- bash -s" <<'LXCEOF'
+ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -s" <<'LXCEOF'
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -147,5 +147,5 @@ LXCEOF
 
 echo ""
 echo "=== Comms LXC ($HOSTNAME) provisioned ==="
-echo "SSH into pve1, then: pct enter $CTID"
+echo "SSH into pve1, then: sudo pct enter $CTID"
 echo "Link Signal device before proceeding."
