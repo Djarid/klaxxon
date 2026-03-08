@@ -14,6 +14,7 @@ class ReminderCreate(BaseModel):
     """Request body for creating a reminder."""
 
     title: str = Field(..., min_length=1, max_length=500)
+    description: Optional[str] = Field(default=None, max_length=2000)
     starts_at: datetime
     duration_min: int = Field(default=90, ge=1, le=1440)
     link: Optional[str] = Field(default=None, max_length=2000)
@@ -25,6 +26,7 @@ class ReminderResponse(BaseModel):
 
     id: int
     title: str
+    description: Optional[str]
     starts_at: datetime
     duration_min: int
     link: Optional[str]

@@ -18,6 +18,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
+    description TEXT,
     starts_at TEXT NOT NULL,
     duration_min INTEGER NOT NULL DEFAULT 90,
     link TEXT,
@@ -67,6 +68,7 @@ def _row_to_reminder(row: sqlite3.Row) -> Reminder:
     return Reminder(
         id=row["id"],
         title=row["title"],
+        description=row["description"],
         starts_at=_parse_dt(row["starts_at"]),
         duration_min=row["duration_min"],
         link=row["link"],
@@ -105,10 +107,11 @@ class SqliteReminderRepository(ReminderRepository):
         conn = self._get_conn()
         cursor = conn.execute(
             """INSERT INTO reminders
-            (title, starts_at, duration_min, link, source, state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (title, description, starts_at, duration_min, link, source, state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 reminder.title,
+                reminder.description,
                 reminder.starts_at.isoformat() if reminder.starts_at else now,
                 reminder.duration_min,
                 reminder.link,

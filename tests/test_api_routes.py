@@ -543,3 +543,48 @@ def test_service_not_initialised() -> None:
 
     # Cleanup
     auth._valid_token_hashes.clear()
+
+
+# ============================================================================
+# Description Field Tests
+# ============================================================================
+
+
+def test_create_reminder_with_description(
+    client: TestClient, auth_headers: dict, future_time: datetime
+) -> None:
+    """POST /api/reminders with description field returns 201 with description in response."""
+    payload = {
+        "title": "Medication Reminder",
+        "description": "Take 10mg Ramipril with water",
+        "starts_at": future_time.isoformat(),
+        "duration_min": 5,
+        "source": "api",
+    }
+
+    response = client.post("/api/reminders", json=payload, headers=auth_headers)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "Medication Reminder"
+    assert data["description"] == "Take 10mg Ramipril with water"
+    assert data["state"] == "pending"
+
+
+def test_create_reminder_without_description(
+    client: TestClient, auth_headers: dict, future_time: datetime
+) -> None:
+    """POST /api/reminders without description returns 201 with null description."""
+    payload = {
+        "title": "Quick Meeting",
+        "starts_at": future_time.isoformat(),
+        "source": "api",
+    }
+
+    response = client.post("/api/reminders", json=payload, headers=auth_headers)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "Quick Meeting"
+    assert data["description"] is None
+    assert data["state"] == "pending"

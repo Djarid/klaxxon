@@ -176,6 +176,7 @@ class ReminderEngine:
             title=reminder.title,
             time=time_str,
             link=reminder.link or "(no link)",
+            description=reminder.description or "",
             mins_until=mins_until,
             mins_ago=mins_ago,
         )

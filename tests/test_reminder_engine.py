@@ -954,3 +954,53 @@ class TestEdgeCases:
         assert any("Reminder 1" in t for t in titles)
         assert any("Reminder 2" in t for t in titles)
         assert not any("Reminder 3" in t for t in titles)
+
+
+class TestDescriptionTemplateVariable:
+    """Test that {description} template variable works correctly."""
+
+    @pytest.mark.asyncio
+    async def test_format_message_with_description(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+    ) -> None:
+        """Test that {description} is replaced in message template when present."""
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Medication",
+            description="Take 10mg Ramipril with water",
+            starts_at=starts_at,
+        )
+
+        # Create a template with {description}
+        template = "{title}: {description}"
+        now = starts_at - timedelta(minutes=30)
+
+        formatted = engine._format_message(template, reminder, now)
+
+        assert formatted == "Medication: Take 10mg Ramipril with water"
+
+    @pytest.mark.asyncio
+    async def test_format_message_without_description(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+    ) -> None:
+        """Test that {description} renders as empty string when None."""
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Quick Meeting",
+            starts_at=starts_at,
+        )
+        assert reminder.description is None
+
+        # Create a template with {description}
+        template = "{title}. {description}"
+        now = starts_at - timedelta(minutes=30)
+
+        formatted = engine._format_message(template, reminder, now)
+
+        # Should render as empty string, not "None"
+        assert formatted == "Quick Meeting. "
+        assert "None" not in formatted

@@ -56,6 +56,7 @@ class ReminderService:
         duration_min: int = 90,
         link: Optional[str] = None,
         source: str = "manual",
+        description: Optional[str] = None,
     ) -> Reminder:
         """Create a new reminder.
 
@@ -83,6 +84,7 @@ class ReminderService:
 
         reminder = Reminder(
             title=title,
+            description=description,
             starts_at=starts_at,
             duration_min=duration_min,
             link=link,

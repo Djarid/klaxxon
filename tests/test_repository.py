@@ -37,7 +37,9 @@ def test_list_all(repo: SqliteReminderRepository) -> None:
 
 def test_list_all_by_state(repo: SqliteReminderRepository) -> None:
     repo.create(Reminder(title="A", starts_at=_future(1), state=ReminderState.PENDING))
-    repo.create(Reminder(title="B", starts_at=_future(2), state=ReminderState.REMINDING))
+    repo.create(
+        Reminder(title="B", starts_at=_future(2), state=ReminderState.REMINDING)
+    )
     pending = repo.list_all(state=ReminderState.PENDING)
     assert len(pending) == 1
     assert pending[0].title == "A"
@@ -48,7 +50,9 @@ def test_list_upcoming_by_states(repo: SqliteReminderRepository) -> None:
     repo.create(
         Reminder(title="B", starts_at=_future(2), state=ReminderState.ACKNOWLEDGED)
     )
-    upcoming = repo.list_upcoming(states=[ReminderState.PENDING, ReminderState.REMINDING])
+    upcoming = repo.list_upcoming(
+        states=[ReminderState.PENDING, ReminderState.REMINDING]
+    )
     assert len(upcoming) == 1
     assert upcoming[0].title == "A"
 
@@ -98,3 +102,34 @@ def test_get_last_reminder_time_none(repo: SqliteReminderRepository) -> None:
     created = repo.create(Reminder(title="Test", starts_at=_future()))
     assert created.id is not None
     assert repo.get_last_reminder_time(created.id) is None
+
+
+def test_create_reminder_with_description(repo: SqliteReminderRepository) -> None:
+    """Test creating a reminder with a description field."""
+    reminder = Reminder(
+        title="Team Meeting",
+        description="Discuss Q2 roadmap and budget allocation",
+        starts_at=_future(),
+        link="https://zoom.us/j/123",
+    )
+    created = repo.create(reminder)
+    assert created.id is not None
+    assert created.description == "Discuss Q2 roadmap and budget allocation"
+
+    # Verify it persists
+    fetched = repo.get(created.id)
+    assert fetched is not None
+    assert fetched.description == "Discuss Q2 roadmap and budget allocation"
+
+
+def test_create_reminder_without_description(repo: SqliteReminderRepository) -> None:
+    """Test creating a reminder without a description defaults to None."""
+    reminder = Reminder(title="Quick Standup", starts_at=_future())
+    created = repo.create(reminder)
+    assert created.id is not None
+    assert created.description is None
+
+    # Verify it persists as None
+    fetched = repo.get(created.id)
+    assert fetched is not None
+    assert fetched.description is None

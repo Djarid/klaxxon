@@ -95,6 +95,12 @@
                             <input id="m-link" type="url" x-model="form.link"
                                    placeholder="https://zoom.us/j/...">
                         </div>
+                        <div class="form-group">
+                            <label for="m-description">Notes (optional)</label>
+                            <textarea id="m-description" x-model="form.description"
+                                      placeholder="Optional notes or description"
+                                      rows="3"></textarea>
+                        </div>
                         <button class="btn btn-primary" @click="createReminder()"
                                 :disabled="!form.title || !form.starts_at || creating">
                             <span x-text="creating ? 'Creating...' : 'Create reminder'"></span>
@@ -127,6 +133,11 @@
                         <template x-if="r.link">
                             <a class="reminder-link" :href="r.link" target="_blank"
                                rel="noopener" x-text="r.link"></a>
+                        </template>
+
+                        <template x-if="r.description">
+                            <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; white-space: pre-wrap;"
+                                 x-text="r.description"></div>
                         </template>
 
                         <template x-if="r.ack_keyword">
@@ -183,6 +194,7 @@ function klaxxon() {
             starts_at: '',
             duration_min: 90,
             link: '',
+            description: '',
         },
 
         /* Polling */
@@ -273,6 +285,7 @@ function klaxxon() {
                 source: 'web',
             };
             if (this.form.link) body.link = this.form.link;
+            if (this.form.description) body.description = this.form.description;
 
             try {
                 const resp = await this._fetch('/api/reminders', {
@@ -282,7 +295,7 @@ function klaxxon() {
 
                 if (resp.ok) {
                     this.success = 'Reminder created.';
-                    this.form = { title: '', starts_at: '', duration_min: 90, link: '' };
+                    this.form = { title: '', starts_at: '', duration_min: 90, link: '', description: '' };
                     this.showForm = false;
                     await this.refresh();
                     this._clearAlerts();

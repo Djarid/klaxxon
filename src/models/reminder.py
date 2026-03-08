@@ -24,6 +24,7 @@ class Reminder:
 
     id: Optional[int] = None
     title: str = ""
+    description: Optional[str] = None
     starts_at: Optional[datetime] = None
     duration_min: int = 90
     link: Optional[str] = None
