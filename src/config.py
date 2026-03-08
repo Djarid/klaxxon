@@ -12,7 +12,37 @@ from typing import Optional
 
 import yaml
 
-from .services.reminder_engine import EscalationConfig, EscalationStage
+
+@dataclass
+class EscalationStage:
+    """A single stage in the escalation pattern."""
+
+    offset_hours: float
+    interval_min: Optional[int]  # None = single ping
+    target: str = "self"  # "self" or "escalate"
+    message: str = ""
+
+
+@dataclass
+class EscalationOverflow:
+    """Overflow escalation after N minutes with no ack."""
+
+    after_min: int
+    interval_min: int
+    target: str = "escalate"
+    message: str = ""
+
+
+@dataclass
+class EscalationProfile:
+    """Full escalation profile configuration."""
+
+    stages: list[EscalationStage]
+    post_start_interval_min: int = 2
+    post_start_target: str = "self"
+    post_start_message: str = ""
+    overflow: Optional[EscalationOverflow] = None
+    timeout_after_min: Optional[int] = 90  # None = never timeout
 
 
 def _load_dotenv(path: Path) -> dict[str, str]:
@@ -57,10 +87,8 @@ class AppConfig:
     # Timezone
     timezone: str = "Europe/London"
 
-    # Escalation
-    escalation: EscalationConfig = field(
-        default_factory=lambda: EscalationConfig(stages=[])
-    )
+    # Escalation profiles
+    escalation_profiles: dict[str, EscalationProfile] = field(default_factory=dict)
 
     # Scheduler
     check_interval_sec: int = 60
@@ -93,25 +121,38 @@ def load_config(
 
         cfg.timezone = data.get("timezone", cfg.timezone)
 
-        # Parse escalation
-        esc_data = data.get("escalation", {})
-        stages = []
-        for s in esc_data.get("stages", []):
-            stages.append(
-                EscalationStage(
-                    offset_hours=s["offset_hours"],
-                    interval_min=s.get("interval_min"),
-                    message=s["message"],
+        # Parse escalation profiles
+        profiles_data = data.get("escalation_profiles", {})
+        for profile_name, profile_data in profiles_data.items():
+            stages = []
+            for s in profile_data.get("stages", []):
+                stages.append(
+                    EscalationStage(
+                        offset_hours=s["offset_hours"],
+                        interval_min=s.get("interval_min"),
+                        target=s.get("target", "self"),
+                        message=s.get("message", ""),
+                    )
                 )
+
+            overflow = None
+            if "overflow" in profile_data:
+                ov = profile_data["overflow"]
+                overflow = EscalationOverflow(
+                    after_min=ov["after_min"],
+                    interval_min=ov["interval_min"],
+                    target=ov.get("target", "escalate"),
+                    message=ov.get("message", ""),
+                )
+
+            cfg.escalation_profiles[profile_name] = EscalationProfile(
+                stages=stages,
+                post_start_interval_min=profile_data.get("post_start_interval_min", 2),
+                post_start_target=profile_data.get("post_start_target", "self"),
+                post_start_message=profile_data.get("post_start_message", ""),
+                overflow=overflow,
+                timeout_after_min=profile_data.get("timeout_after_min", 90),
             )
-        cfg.escalation = EscalationConfig(
-            stages=stages,
-            post_start_interval_min=esc_data.get("post_start_interval_min", 2),
-            post_start_message=esc_data.get(
-                "post_start_message", cfg.escalation.post_start_message
-            ),
-            timeout_after_min=esc_data.get("timeout_after_min", 90),
-        )
 
         # Scheduler
         sched = data.get("scheduler", {})

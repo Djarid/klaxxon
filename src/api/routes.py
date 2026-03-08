@@ -63,6 +63,8 @@ async def create_reminder(body: ReminderCreate) -> ReminderResponse:
             link=body.link,
             source=body.source,
             description=body.description,
+            profile=body.profile,
+            escalate_to=body.escalate_to,
         )
     except PastReminderError as e:
         raise HTTPException(status_code=400, detail=str(e))

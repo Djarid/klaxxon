@@ -101,6 +101,21 @@
                                       placeholder="Optional notes or description"
                                       rows="3"></textarea>
                         </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="m-profile">Profile</label>
+                                <select id="m-profile" x-model="form.profile">
+                                    <option value="meeting">Meeting</option>
+                                    <option value="persistent">Persistent</option>
+                                    <option value="gentle">Gentle</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="m-escalate">Escalate to (optional)</label>
+                                <input id="m-escalate" type="tel" x-model="form.escalate_to"
+                                       placeholder="+441234567890">
+                            </div>
+                        </div>
                         <button class="btn btn-primary" @click="createReminder()"
                                 :disabled="!form.title || !form.starts_at || creating">
                             <span x-text="creating ? 'Creating...' : 'Create reminder'"></span>
@@ -121,6 +136,10 @@
                             <span class="badge" :class="'badge-' + r.state"
                                   x-text="r.state"></span>
                             <span class="title" x-text="r.title"></span>
+                            <template x-if="r.profile !== 'meeting'">
+                                <span class="badge" style="background: var(--primary); color: white;"
+                                      x-text="r.profile"></span>
+                            </template>
                         </div>
 
                         <div class="meta">
@@ -128,6 +147,9 @@
                             <span x-text="r.duration_min + ' min'"></span>
                             <span x-text="'#' + r.id"></span>
                             <span x-text="'via ' + r.source"></span>
+                            <template x-if="r.escalate_to">
+                                <span x-text="'escalate: ' + r.escalate_to"></span>
+                            </template>
                         </div>
 
                         <template x-if="r.link">
@@ -195,6 +217,8 @@ function klaxxon() {
             duration_min: 90,
             link: '',
             description: '',
+            profile: 'meeting',
+            escalate_to: '',
         },
 
         /* Polling */
@@ -283,9 +307,11 @@ function klaxxon() {
                 starts_at: dt.toISOString(),
                 duration_min: this.form.duration_min || 90,
                 source: 'web',
+                profile: this.form.profile || 'meeting',
             };
             if (this.form.link) body.link = this.form.link;
             if (this.form.description) body.description = this.form.description;
+            if (this.form.escalate_to) body.escalate_to = this.form.escalate_to;
 
             try {
                 const resp = await this._fetch('/api/reminders', {
@@ -295,7 +321,7 @@ function klaxxon() {
 
                 if (resp.ok) {
                     this.success = 'Reminder created.';
-                    this.form = { title: '', starts_at: '', duration_min: 90, link: '', description: '' };
+                    this.form = { title: '', starts_at: '', duration_min: 90, link: '', description: '', profile: 'meeting', escalate_to: '' };
                     this.showForm = false;
                     await this.refresh();
                     this._clearAlerts();

@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
         repository=repo,
         sender=signal_client,
         recipient=_config.signal_recipient,
-        config=_config.escalation,
+        escalation_profiles=_config.escalation_profiles,
     )
 
     _signal_handler = SignalHandler(

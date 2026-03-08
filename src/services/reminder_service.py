@@ -57,6 +57,8 @@ class ReminderService:
         link: Optional[str] = None,
         source: str = "manual",
         description: Optional[str] = None,
+        profile: str = "meeting",
+        escalate_to: Optional[str] = None,
     ) -> Reminder:
         """Create a new reminder.
 
@@ -89,6 +91,8 @@ class ReminderService:
             duration_min=duration_min,
             link=link,
             source=source,
+            profile=profile,
+            escalate_to=escalate_to,
             state=ReminderState.PENDING,
         )
         return self._repo.create(reminder)

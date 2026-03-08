@@ -11,19 +11,16 @@ from unittest.mock import patch
 
 import pytest
 
+from src.config import EscalationOverflow, EscalationProfile, EscalationStage
 from src.models.reminder import Reminder, ReminderState
 from src.repository.sqlite import SqliteReminderRepository
 from src.services.reminder_service import ReminderService
-from src.services.reminder_engine import (
-    EscalationConfig,
-    EscalationStage,
-    ReminderEngine,
-)
+from src.services.reminder_engine import ReminderEngine
 from tests.conftest import FailingSender, MockSender
 
 
 @pytest.fixture
-def escalation_config() -> EscalationConfig:
+def escalation_config() -> dict[str, EscalationProfile]:
     """Simple 2-stage escalation config for testing.
 
     Stage 1: 1 hour before, single ping
@@ -31,23 +28,29 @@ def escalation_config() -> EscalationConfig:
     Post-start: every 2 minutes
     Timeout: 30 minutes after start
     """
-    return EscalationConfig(
-        stages=[
-            EscalationStage(
-                offset_hours=-1.0,
-                interval_min=None,
-                message="Reminder: {title} at {time}",
-            ),
-            EscalationStage(
-                offset_hours=-0.25,  # 15 minutes before
-                interval_min=5,
-                message="{title} in {mins_until} min! {link}",
-            ),
-        ],
-        post_start_interval_min=2,
-        post_start_message="MEETING STARTED {mins_ago} min ago: {title}. {link}",
-        timeout_after_min=30,
-    )
+    return {
+        "meeting": EscalationProfile(
+            stages=[
+                EscalationStage(
+                    offset_hours=-1.0,
+                    interval_min=None,
+                    target="self",
+                    message="Reminder: {title} at {time}",
+                ),
+                EscalationStage(
+                    offset_hours=-0.25,  # 15 minutes before
+                    interval_min=5,
+                    target="self",
+                    message="{title} in {mins_until} min! {link}",
+                ),
+            ],
+            post_start_interval_min=2,
+            post_start_target="self",
+            post_start_message="MEETING STARTED {mins_ago} min ago: {title}. {link}",
+            overflow=None,
+            timeout_after_min=30,
+        )
+    }
 
 
 @pytest.fixture
@@ -55,7 +58,7 @@ def engine(
     service: ReminderService,
     repo: SqliteReminderRepository,
     mock_sender: MockSender,
-    escalation_config: EscalationConfig,
+    escalation_config: dict[str, EscalationProfile],
 ) -> ReminderEngine:
     """ReminderEngine instance with test config."""
     return ReminderEngine(
@@ -63,7 +66,7 @@ def engine(
         repository=repo,
         sender=mock_sender,
         recipient="+441234567890",
-        config=escalation_config,
+        escalation_profiles=escalation_config,
     )
 
 
@@ -639,7 +642,7 @@ class TestFailureHandling:
         self,
         service: ReminderService,
         repo: SqliteReminderRepository,
-        escalation_config: EscalationConfig,
+        escalation_config: dict[str, EscalationProfile],
     ) -> None:
         """Failed send does not log reminder or transition state."""
         failing_sender = FailingSender()
@@ -648,7 +651,7 @@ class TestFailureHandling:
             repository=repo,
             sender=failing_sender,
             recipient="+441234567890",
-            config=escalation_config,
+            escalation_profiles=escalation_config,
         )
 
         starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
@@ -1004,3 +1007,727 @@ class TestDescriptionTemplateVariable:
         # Should render as empty string, not "None"
         assert formatted == "Quick Meeting. "
         assert "None" not in formatted
+
+
+class TestEscalationProfiles:
+    """Test profile loading and selection."""
+
+    @pytest.mark.asyncio
+    async def test_engine_uses_meeting_profile_by_default(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Reminder with profile='meeting' uses meeting stages."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=-1.0,
+                        interval_min=None,
+                        target="self",
+                        message="Meeting: {title}",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Meeting started",
+                overflow=None,
+                timeout_after_min=30,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+        )
+        assert reminder.id is not None
+
+        # Trigger stage
+        now = starts_at - timedelta(hours=1)
+        await engine._process_reminder(reminder, now)
+
+        # Should use meeting profile message
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Meeting: Test" == text
+
+    @pytest.mark.asyncio
+    async def test_engine_uses_persistent_profile(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Reminder with profile='persistent' uses persistent stages."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=-1.0,
+                        interval_min=None,
+                        target="self",
+                        message="Meeting: {title}",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Meeting started",
+                overflow=None,
+                timeout_after_min=30,
+            ),
+            "persistent": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=0,
+                        interval_min=5,
+                        target="self",
+                        message="Persistent: {title}",
+                    )
+                ],
+                post_start_interval_min=5,
+                post_start_target="self",
+                post_start_message="Persistent overdue",
+                overflow=None,
+                timeout_after_min=None,
+            ),
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Medication",
+            starts_at=starts_at,
+            profile="persistent",
+        )
+        assert reminder.id is not None
+
+        # Trigger at start time
+        now = starts_at
+        await engine._process_reminder(reminder, now)
+
+        # Should use persistent profile message
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Persistent: Medication" == text
+
+    @pytest.mark.asyncio
+    async def test_engine_falls_back_to_meeting_for_unknown_profile(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Unknown profile name falls back to meeting."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=-1.0,
+                        interval_min=None,
+                        target="self",
+                        message="Fallback: {title}",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Fallback started",
+                overflow=None,
+                timeout_after_min=30,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="nonexistent",
+        )
+        assert reminder.id is not None
+
+        # Trigger stage
+        now = starts_at - timedelta(hours=1)
+        await engine._process_reminder(reminder, now)
+
+        # Should use meeting profile (fallback)
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Fallback: Test" == text
+
+
+class TestTargetResolution:
+    """Test target resolution (self vs escalate)."""
+
+    @pytest.mark.asyncio
+    async def test_target_self_sends_to_owner(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Stage with target=self sends to SIGNAL_RECIPIENT."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=-1.0,
+                        interval_min=None,
+                        target="self",
+                        message="Test",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Started",
+                overflow=None,
+                timeout_after_min=30,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+        )
+        assert reminder.id is not None
+
+        now = starts_at - timedelta(hours=1)
+        await engine._process_reminder(reminder, now)
+
+        # Should send to owner only
+        assert len(mock_sender.messages) == 1
+        recipient, _ = mock_sender.messages[0]
+        assert recipient == "+441234567890"
+
+    @pytest.mark.asyncio
+    async def test_target_escalate_with_escalate_to_sends_to_both(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Stage with target=escalate and escalate_to set sends to both owner and escalate_to."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=-1.0,
+                        interval_min=None,
+                        target="escalate",
+                        message="Test",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Started",
+                overflow=None,
+                timeout_after_min=30,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+            escalate_to="+447700900123",
+        )
+        assert reminder.id is not None
+
+        now = starts_at - timedelta(hours=1)
+        await engine._process_reminder(reminder, now)
+
+        # Should send to both owner and escalate_to
+        assert len(mock_sender.messages) == 2
+        recipients = [msg[0] for msg in mock_sender.messages]
+        assert "+441234567890" in recipients
+        assert "+447700900123" in recipients
+
+    @pytest.mark.asyncio
+    async def test_target_escalate_without_escalate_to_sends_to_owner_only(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Stage with target=escalate but no escalate_to falls back to owner."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=-1.0,
+                        interval_min=None,
+                        target="escalate",
+                        message="Test",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Started",
+                overflow=None,
+                timeout_after_min=30,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+            escalate_to=None,
+        )
+        assert reminder.id is not None
+
+        now = starts_at - timedelta(hours=1)
+        await engine._process_reminder(reminder, now)
+
+        # Should send to owner only
+        assert len(mock_sender.messages) == 1
+        recipient, _ = mock_sender.messages[0]
+        assert recipient == "+441234567890"
+
+
+class TestNullTimeout:
+    """Test null timeout behavior (persistent profile)."""
+
+    @pytest.mark.asyncio
+    async def test_persistent_profile_never_times_out(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Reminder with timeout_after_min=null stays in REMINDING forever."""
+        profiles = {
+            "persistent": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=0,
+                        interval_min=5,
+                        target="self",
+                        message="Persistent",
+                    )
+                ],
+                post_start_interval_min=5,
+                post_start_target="self",
+                post_start_message="Overdue",
+                overflow=None,
+                timeout_after_min=None,  # Never timeout
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Medication",
+            starts_at=starts_at,
+            profile="persistent",
+        )
+        assert reminder.id is not None
+        service.mark_reminding(reminder.id)
+
+        # 1000 minutes after start (way past any normal timeout)
+        now = starts_at + timedelta(minutes=1000)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+
+        # Should NOT mark as missed, should send post-start
+        updated = service.get(reminder.id)
+        assert updated.state == ReminderState.REMINDING
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Overdue" in text
+
+    @pytest.mark.asyncio
+    async def test_meeting_profile_times_out(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Meeting profile with timeout_after_min=30 times out."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=-1.0,
+                        interval_min=None,
+                        target="self",
+                        message="Meeting",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Started",
+                overflow=None,
+                timeout_after_min=30,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+        )
+        assert reminder.id is not None
+        service.mark_reminding(reminder.id)
+
+        # 31 minutes after start (past timeout)
+        now = starts_at + timedelta(minutes=31)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+
+        # Should mark as missed
+        updated = service.get(reminder.id)
+        assert updated.state == ReminderState.MISSED
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "MISSED" in text
+
+
+class TestOverflow:
+    """Test overflow escalation."""
+
+    @pytest.mark.asyncio
+    async def test_overflow_triggers_after_configured_minutes(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Overflow fires after after_min with no ack."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=0,
+                        interval_min=1,
+                        target="self",
+                        message="Started",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Post-start",
+                overflow=EscalationOverflow(
+                    after_min=10,
+                    interval_min=5,
+                    target="escalate",
+                    message="Overflow: {title}",
+                ),
+                timeout_after_min=90,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+            escalate_to="+447700900123",
+        )
+        assert reminder.id is not None
+        service.mark_reminding(reminder.id)
+
+        # 11 minutes after start (past overflow trigger)
+        now = starts_at + timedelta(minutes=11)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+
+        # Should send overflow message to both
+        assert len(mock_sender.messages) == 2
+        recipients = [msg[0] for msg in mock_sender.messages]
+        assert "+441234567890" in recipients
+        assert "+447700900123" in recipients
+        # Check message content
+        texts = [msg[1] for msg in mock_sender.messages]
+        assert all("Overflow: Test" in t for t in texts)
+
+    @pytest.mark.asyncio
+    async def test_overflow_does_not_trigger_before_time(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Overflow doesn't fire before after_min."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=0,
+                        interval_min=1,
+                        target="self",
+                        message="Started",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Post-start",
+                overflow=EscalationOverflow(
+                    after_min=10,
+                    interval_min=5,
+                    target="escalate",
+                    message="Overflow",
+                ),
+                timeout_after_min=90,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+            escalate_to="+447700900123",
+        )
+        assert reminder.id is not None
+        service.mark_reminding(reminder.id)
+
+        # 5 minutes after start (before overflow trigger at 10)
+        now = starts_at + timedelta(minutes=5)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+
+        # Should send post-start, not overflow
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Post-start" in text
+        assert "Overflow" not in text
+
+    @pytest.mark.asyncio
+    async def test_overflow_sends_to_escalate_target(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Overflow with target=escalate sends to escalate_to."""
+        profiles = {
+            "meeting": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=0,
+                        interval_min=1,
+                        target="self",
+                        message="Started",
+                    )
+                ],
+                post_start_interval_min=2,
+                post_start_target="self",
+                post_start_message="Post-start",
+                overflow=EscalationOverflow(
+                    after_min=10,
+                    interval_min=5,
+                    target="escalate",
+                    message="Overflow",
+                ),
+                timeout_after_min=90,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Test",
+            starts_at=starts_at,
+            profile="meeting",
+            escalate_to="+447700900123",
+        )
+        assert reminder.id is not None
+        service.mark_reminding(reminder.id)
+
+        # 11 minutes after start
+        now = starts_at + timedelta(minutes=11)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+
+        # Should send to both owner and escalate_to
+        assert len(mock_sender.messages) == 2
+        recipients = [msg[0] for msg in mock_sender.messages]
+        assert "+441234567890" in recipients
+        assert "+447700900123" in recipients
+
+
+class TestPersistentProfileBehavior:
+    """Test persistent profile specific behavior."""
+
+    @pytest.mark.asyncio
+    async def test_persistent_profile_flat_nag_interval(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Persistent profile has single stage with flat 5-min nags."""
+        profiles = {
+            "persistent": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=0,
+                        interval_min=5,
+                        target="self",
+                        message="Reminder: {title}",
+                    )
+                ],
+                post_start_interval_min=5,
+                post_start_target="self",
+                post_start_message="Overdue: {title}",
+                overflow=None,
+                timeout_after_min=None,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Medication",
+            starts_at=starts_at,
+            profile="persistent",
+        )
+        assert reminder.id is not None
+
+        # At start time
+        now = starts_at
+        await engine._process_reminder(reminder, now)
+
+        # Should send first reminder
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Reminder: Medication" == text
+
+    @pytest.mark.asyncio
+    async def test_persistent_profile_description_in_message(
+        self,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Persistent profile message includes {description}."""
+        profiles = {
+            "persistent": EscalationProfile(
+                stages=[
+                    EscalationStage(
+                        offset_hours=0,
+                        interval_min=5,
+                        target="self",
+                        message="{title}. {description}",
+                    )
+                ],
+                post_start_interval_min=5,
+                post_start_target="self",
+                post_start_message="Overdue: {title}. {description}",
+                overflow=None,
+                timeout_after_min=None,
+            )
+        }
+        engine = ReminderEngine(
+            service=service,
+            repository=repo,
+            sender=mock_sender,
+            recipient="+441234567890",
+            escalation_profiles=profiles,
+        )
+
+        starts_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reminder = service.create(
+            title="Medication",
+            description="Take 10mg Ramipril with water",
+            starts_at=starts_at,
+            profile="persistent",
+        )
+        assert reminder.id is not None
+
+        # At start time
+        now = starts_at
+        await engine._process_reminder(reminder, now)
+
+        # Should include description
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert text == "Medication. Take 10mg Ramipril with water"

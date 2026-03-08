@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS reminders (
     duration_min INTEGER NOT NULL DEFAULT 90,
     link TEXT,
     source TEXT NOT NULL DEFAULT 'manual',
+    profile TEXT NOT NULL DEFAULT 'meeting',
+    escalate_to TEXT,
     state TEXT NOT NULL DEFAULT 'pending',
     ack_keyword TEXT,
     ack_at TEXT,
@@ -73,6 +75,8 @@ def _row_to_reminder(row: sqlite3.Row) -> Reminder:
         duration_min=row["duration_min"],
         link=row["link"],
         source=row["source"],
+        profile=row["profile"],
+        escalate_to=row["escalate_to"],
         state=ReminderState(row["state"]),
         ack_keyword=row["ack_keyword"],
         ack_at=_parse_dt(row["ack_at"]),
@@ -107,8 +111,8 @@ class SqliteReminderRepository(ReminderRepository):
         conn = self._get_conn()
         cursor = conn.execute(
             """INSERT INTO reminders
-            (title, description, starts_at, duration_min, link, source, state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (title, description, starts_at, duration_min, link, source, profile, escalate_to, state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 reminder.title,
                 reminder.description,
@@ -116,6 +120,8 @@ class SqliteReminderRepository(ReminderRepository):
                 reminder.duration_min,
                 reminder.link,
                 reminder.source,
+                reminder.profile,
+                reminder.escalate_to,
                 reminder.state.value,
                 now,
                 now,

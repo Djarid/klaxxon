@@ -588,3 +588,81 @@ def test_create_reminder_without_description(
     assert data["title"] == "Quick Meeting"
     assert data["description"] is None
     assert data["state"] == "pending"
+
+
+# ============================================================================
+# Profile and escalate_to tests
+# ============================================================================
+
+
+def test_create_reminder_with_profile(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    future_time: datetime,
+) -> None:
+    """POST /api/reminders with profile field."""
+    payload = {
+        "title": "Medication Reminder",
+        "starts_at": future_time.isoformat(),
+        "profile": "persistent",
+        "source": "api",
+    }
+
+    response = client.post("/api/reminders", json=payload, headers=auth_headers)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "Medication Reminder"
+    assert data["profile"] == "persistent"
+    assert data["escalate_to"] is None
+
+
+def test_create_reminder_with_escalate_to(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    future_time: datetime,
+) -> None:
+    """POST /api/reminders with valid E.164 escalate_to number."""
+    payload = {
+        "title": "Important Meeting",
+        "starts_at": future_time.isoformat(),
+        "profile": "meeting",
+        "escalate_to": "+447700900123",
+        "source": "api",
+    }
+
+    response = client.post("/api/reminders", json=payload, headers=auth_headers)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "Important Meeting"
+    assert data["profile"] == "meeting"
+    assert data["escalate_to"] == "+447700900123"
+
+
+def test_create_reminder_with_invalid_escalate_to(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    future_time: datetime,
+) -> None:
+    """POST /api/reminders with invalid phone number returns 422."""
+    # Invalid: missing +
+    payload = {
+        "title": "Test",
+        "starts_at": future_time.isoformat(),
+        "escalate_to": "447700900123",
+        "source": "api",
+    }
+
+    response = client.post("/api/reminders", json=payload, headers=auth_headers)
+    assert response.status_code == 422
+
+    # Invalid: too short
+    payload["escalate_to"] = "+44123"
+    response = client.post("/api/reminders", json=payload, headers=auth_headers)
+    assert response.status_code == 422
+
+    # Invalid: starts with +0
+    payload["escalate_to"] = "+0441234567890"
+    response = client.post("/api/reminders", json=payload, headers=auth_headers)
+    assert response.status_code == 422

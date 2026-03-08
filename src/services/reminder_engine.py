@@ -8,35 +8,16 @@ Single Responsibility: decides WHEN to send. Does not decide HOW.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from ..config import EscalationProfile
 from ..models.reminder import Reminder, ReminderState
 from ..repository.sqlite import SqliteReminderRepository
 from .reminder_service import ReminderService
 from .notification.base import MessageSender
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class EscalationStage:
-    """A single stage in the escalation pattern."""
-
-    offset_hours: float
-    interval_min: Optional[int]  # None = single ping
-    message: str
-
-
-@dataclass
-class EscalationConfig:
-    """Full escalation configuration."""
-
-    stages: list[EscalationStage]
-    post_start_interval_min: int = 2
-    post_start_message: str = "REMINDER STARTED {mins_ago} min ago: {title}. {link}"
-    timeout_after_min: int = 90
 
 
 class ReminderEngine:
@@ -48,13 +29,13 @@ class ReminderEngine:
         repository: SqliteReminderRepository,
         sender: MessageSender,
         recipient: str,
-        config: EscalationConfig,
+        escalation_profiles: dict[str, EscalationProfile],
     ) -> None:
         self._service = service
         self._repo = repository
         self._sender = sender
         self._recipient = recipient
-        self._config = config
+        self._profiles = escalation_profiles
 
     async def tick(self) -> None:
         """Run one scheduler cycle. Called periodically by the main loop."""
@@ -78,37 +59,76 @@ class ReminderEngine:
         assert reminder.starts_at is not None
         assert reminder.id is not None
 
+        # Load profile for this reminder
+        profile = self._get_profile(reminder)
         starts_at = reminder.starts_at
-        reminder_end = starts_at + timedelta(minutes=reminder.duration_min)
-        timeout = starts_at + timedelta(minutes=self._config.timeout_after_min)
 
-        # Check timeout first
-        if now >= timeout and reminder.state == ReminderState.REMINDING:
-            self._service.mark_missed(reminder.id)
-            msg = f"MISSED: {reminder.title} (no acknowledgement received)"
-            await self._sender.send_message(self._recipient, msg)
-            return
+        # Check timeout first (if profile has timeout)
+        if profile.timeout_after_min is not None:
+            timeout = starts_at + timedelta(minutes=profile.timeout_after_min)
+            if now >= timeout and reminder.state == ReminderState.REMINDING:
+                self._service.mark_missed(reminder.id)
+                msg = f"MISSED: {reminder.title} (no acknowledgement received)"
+                await self._send_to_recipients(reminder, msg, "self")
+                return
 
-        # After reminder start: use post-start pattern
+        # After reminder start: check overflow first, then post-start
         if now >= starts_at and reminder.state == ReminderState.REMINDING:
-            await self._maybe_send_post_start(reminder, now)
+            # Check if overflow should trigger
+            if profile.overflow is not None:
+                overflow_trigger = starts_at + timedelta(
+                    minutes=profile.overflow.after_min
+                )
+                if now >= overflow_trigger:
+                    await self._maybe_send_overflow(reminder, now, profile)
+                    return
+            # Otherwise use post-start pattern
+            await self._maybe_send_post_start(reminder, now, profile)
             return
 
         # Before reminder start: check escalation stages
-        await self._check_escalation_stages(reminder, now, starts_at)
+        await self._check_escalation_stages(reminder, now, starts_at, profile)
+
+    def _get_profile(self, reminder: Reminder) -> EscalationProfile:
+        """Get the escalation profile for a reminder, with fallback."""
+        profile_name = getattr(reminder, "profile", "meeting")
+        if profile_name in self._profiles:
+            return self._profiles[profile_name]
+
+        # Profile not found, try to fall back to meeting
+        logger.warning(
+            "Profile '%s' not found for reminder %d, falling back to 'meeting'",
+            profile_name,
+            reminder.id or 0,
+        )
+        if "meeting" in self._profiles:
+            return self._profiles["meeting"]
+
+        # No meeting profile either, use first available profile
+        if self._profiles:
+            first_profile = next(iter(self._profiles.values()))
+            logger.warning(
+                "No 'meeting' profile found, using first available profile for reminder %d",
+                reminder.id or 0,
+            )
+            return first_profile
+
+        # No profiles at all - this should never happen in production
+        raise ValueError("No escalation profiles configured")
 
     async def _check_escalation_stages(
         self,
         reminder: Reminder,
         now: datetime,
         starts_at: datetime,
+        profile: EscalationProfile,
     ) -> None:
         """Check if any escalation stage should fire."""
         assert reminder.id is not None
 
         # Find the most aggressive applicable stage
-        applicable_stage: Optional[EscalationStage] = None
-        for stage in self._config.stages:
+        applicable_stage = None
+        for stage in profile.stages:
             trigger_time = starts_at + timedelta(hours=stage.offset_hours)
             if now >= trigger_time:
                 applicable_stage = stage
@@ -133,30 +153,84 @@ class ReminderEngine:
 
         # Send the reminder
         msg = self._format_message(applicable_stage.message, reminder, now)
-        sent = await self._sender.send_message(self._recipient, msg)
+        sent = await self._send_to_recipients(reminder, msg, applicable_stage.target)
         if sent:
             self._repo.log_reminder(reminder.id, msg)
             # Transition to reminding if still pending
             if reminder.state == ReminderState.PENDING:
                 self._service.mark_reminding(reminder.id)
 
-    async def _maybe_send_post_start(self, reminder: Reminder, now: datetime) -> None:
+    async def _maybe_send_post_start(
+        self, reminder: Reminder, now: datetime, profile: EscalationProfile
+    ) -> None:
         """Send post-start reminders at configured interval."""
         assert reminder.id is not None
         assert reminder.starts_at is not None
 
         last_sent = self._repo.get_last_reminder_time(reminder.id)
         if last_sent is not None:
-            next_send = last_sent + timedelta(
-                minutes=self._config.post_start_interval_min
-            )
+            next_send = last_sent + timedelta(minutes=profile.post_start_interval_min)
             if now < next_send:
                 return
 
-        msg = self._format_message(self._config.post_start_message, reminder, now)
-        sent = await self._sender.send_message(self._recipient, msg)
+        msg = self._format_message(profile.post_start_message, reminder, now)
+        sent = await self._send_to_recipients(reminder, msg, profile.post_start_target)
         if sent:
             self._repo.log_reminder(reminder.id, msg)
+
+    async def _maybe_send_overflow(
+        self, reminder: Reminder, now: datetime, profile: EscalationProfile
+    ) -> None:
+        """Send overflow reminders after configured time with no ack."""
+        assert reminder.id is not None
+        assert reminder.starts_at is not None
+        assert profile.overflow is not None
+
+        last_sent = self._repo.get_last_reminder_time(reminder.id)
+        if last_sent is not None:
+            next_send = last_sent + timedelta(minutes=profile.overflow.interval_min)
+            if now < next_send:
+                return
+
+        msg = self._format_message(profile.overflow.message, reminder, now)
+        sent = await self._send_to_recipients(reminder, msg, profile.overflow.target)
+        if sent:
+            self._repo.log_reminder(reminder.id, msg)
+
+    async def _send_to_recipients(
+        self, reminder: Reminder, message: str, target: str
+    ) -> bool:
+        """Send message to resolved recipients based on target.
+
+        Returns True if at least one message was sent successfully.
+        """
+        recipients = self._resolve_target(reminder, target)
+        if not recipients:
+            return False
+
+        sent_any = False
+        for recipient in recipients:
+            sent = await self._sender.send_message(recipient, message)
+            if sent:
+                sent_any = True
+        return sent_any
+
+    def _resolve_target(self, reminder: Reminder, target: str) -> list[str]:
+        """Resolve target to list of recipient phone numbers.
+
+        - "self" → [owner_number]
+        - "escalate" → [owner_number, escalate_to] if escalate_to is set, else [owner_number]
+        """
+        recipients = [self._recipient]  # Owner always gets their own reminders
+
+        if target == "escalate":
+            escalate_to = getattr(reminder, "escalate_to", None)
+            if escalate_to:
+                # Add escalate_to recipient (owner already in list)
+                if escalate_to not in recipients:
+                    recipients.append(escalate_to)
+
+        return recipients
 
     def _format_message(self, template: str, reminder: Reminder, now: datetime) -> str:
         """Format a reminder message template."""

@@ -2,36 +2,73 @@
 
 timezone: "Europe/London"
 
-# Escalation pattern for reminders.
-# offset_hours: time relative to reminder start (negative = before)
-# interval_min: null for single ping, number for repeating
-# message: template with {title}, {time}, {link}, {mins_until}, {mins_ago}
-escalation:
-  stages:
-    - offset_hours: -24
-      interval_min: null
-      message: "Tomorrow: {title} at {time}. {link}"
-
-    - offset_hours: -2
-      interval_min: null
-      message: "{title} in 2 hours. {link}"
-
-    - offset_hours: -0.5
+# Escalation profiles for reminders.
+# Each profile defines timing patterns, targets, and timeout behavior.
+# target: "self" (owner) or "escalate" (reminder's escalate_to field)
+escalation_profiles:
+  meeting:
+    stages:
+      - offset_hours: -24
+        interval_min: null
+        target: self
+        message: "Tomorrow: {title} at {time}. {link}"
+      - offset_hours: -2
+        interval_min: null
+        target: self
+        message: "{title} in 2 hours. {link}"
+      - offset_hours: -0.5
+        interval_min: 5
+        target: self
+        message: "{title} in {mins_until} min. {link}"
+      - offset_hours: -0.25
+        interval_min: 2
+        target: self
+        message: "{title} in {mins_until} min! {link}"
+      - offset_hours: 0
+        interval_min: 1
+        target: self
+        message: "JOIN NOW: {title}. {link}"
+    post_start_interval_min: 2
+    post_start_target: self
+    post_start_message: "MEETING STARTED {mins_ago} min ago: {title}. {link}"
+    overflow:
+      after_min: 10
       interval_min: 5
-      message: "{title} in {mins_until} min. {link}"
+      target: escalate
+      message: "Jason hasn't joined: {title} (started {mins_ago} min ago)"
+    timeout_after_min: 90
 
-    - offset_hours: -0.25
-      interval_min: 2
-      message: "{title} in {mins_until} min! {link}"
+  persistent:
+    stages:
+      - offset_hours: 0
+        interval_min: 5
+        target: self
+        message: "{title}. {description}"
+    post_start_interval_min: 5
+    post_start_target: self
+    post_start_message: "OVERDUE ({mins_ago} min): {title}. {description}"
+    overflow:
+      after_min: 30
+      interval_min: 10
+      target: escalate
+      message: "Jason hasn't done: {title} ({mins_ago} min overdue)"
+    timeout_after_min: null
 
-    - offset_hours: 0
-      interval_min: 1
-      message: "JOIN NOW: {title}. {link}"
-
-  # After reminder start time, keep pinging until ack or timeout
-  post_start_interval_min: 2
-  post_start_message: "REMINDER STARTED {mins_ago} min ago: {title}. {link}"
-  timeout_after_min: 90
+  gentle:
+    stages:
+      - offset_hours: -0.25
+        interval_min: 15
+        target: self
+        message: "Reminder: {title}. {description}"
+    post_start_interval_min: 15
+    post_start_target: self
+    post_start_message: "OVERDUE: {title}. {description}"
+    overflow:
+      after_min: 60
+      interval_min: 30
+      target: escalate
+      message: "Jason hasn't actioned: {title} ({mins_ago} min overdue)"
+    timeout_after_min: 480
 
 # Scheduler
 scheduler:

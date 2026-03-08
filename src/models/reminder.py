@@ -29,6 +29,8 @@ class Reminder:
     duration_min: int = 90
     link: Optional[str] = None
     source: str = "manual"
+    profile: str = "meeting"
+    escalate_to: Optional[str] = None
     state: ReminderState = ReminderState.PENDING
     ack_keyword: Optional[str] = None
     ack_at: Optional[datetime] = None

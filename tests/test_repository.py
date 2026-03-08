@@ -133,3 +133,40 @@ def test_create_reminder_without_description(repo: SqliteReminderRepository) -> 
     fetched = repo.get(created.id)
     assert fetched is not None
     assert fetched.description is None
+
+
+def test_create_reminder_with_profile_and_escalate_to(
+    repo: SqliteReminderRepository,
+) -> None:
+    """Test creating a reminder with profile and escalate_to fields."""
+    reminder = Reminder(
+        title="Important Meeting",
+        starts_at=_future(),
+        profile="persistent",
+        escalate_to="+447700900123",
+    )
+    created = repo.create(reminder)
+    assert created.id is not None
+    assert created.profile == "persistent"
+    assert created.escalate_to == "+447700900123"
+
+    # Verify persistence
+    fetched = repo.get(created.id)
+    assert fetched is not None
+    assert fetched.profile == "persistent"
+    assert fetched.escalate_to == "+447700900123"
+
+
+def test_create_reminder_default_profile(repo: SqliteReminderRepository) -> None:
+    """Test creating a reminder without profile defaults to 'meeting'."""
+    reminder = Reminder(title="Test", starts_at=_future())
+    created = repo.create(reminder)
+    assert created.id is not None
+    assert created.profile == "meeting"
+    assert created.escalate_to is None
+
+    # Verify persistence
+    fetched = repo.get(created.id)
+    assert fetched is not None
+    assert fetched.profile == "meeting"
+    assert fetched.escalate_to is None
