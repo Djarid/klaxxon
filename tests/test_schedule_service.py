@@ -287,3 +287,45 @@ def test_spawn_handles_timezone(schedule_service: ScheduleService) -> None:
     local_dt = reminder.starts_at.astimezone(schedule_service._timezone)
     assert local_dt.hour == 9
     assert local_dt.minute == 0
+
+
+def test_spawn_inherits_timing_overrides(schedule_service: ScheduleService) -> None:
+    """Test that spawned reminders inherit lead_time_min and nag_interval_min from schedule."""
+    schedule = schedule_service.create(
+        title="Custom timing schedule",
+        time_of_day="10:00",
+        recurrence="daily",
+        lead_time_min=15,
+        nag_interval_min=2,
+    )
+
+    # Spawn reminders
+    spawned = schedule_service.spawn_reminders()
+    assert len(spawned) >= 1
+
+    # Check that timing overrides are inherited
+    reminder = spawned[0]
+    assert reminder.lead_time_min == 15
+    assert reminder.nag_interval_min == 2
+
+
+def test_create_schedule_with_timing_overrides(
+    schedule_service: ScheduleService,
+) -> None:
+    """Test creating a schedule with lead_time_min and nag_interval_min."""
+    schedule = schedule_service.create(
+        title="Custom schedule",
+        time_of_day="14:00",
+        recurrence="daily",
+        lead_time_min=20,
+        nag_interval_min=5,
+    )
+
+    assert schedule.id is not None
+    assert schedule.lead_time_min == 20
+    assert schedule.nag_interval_min == 5
+
+    # Verify persistence
+    fetched = schedule_service.get(schedule.id)
+    assert fetched.lead_time_min == 20
+    assert fetched.nag_interval_min == 5

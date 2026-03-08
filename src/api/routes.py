@@ -85,6 +85,8 @@ async def create_reminder(body: ReminderCreate) -> ReminderResponse:
             description=body.description,
             profile=body.profile,
             escalate_to=body.escalate_to,
+            lead_time_min=body.lead_time_min,
+            nag_interval_min=body.nag_interval_min,
         )
     except PastReminderError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -211,6 +213,8 @@ async def create_schedule(body: ScheduleCreate) -> ScheduleResponse:
             link=body.link,
             profile=body.profile,
             escalate_to=body.escalate_to,
+            lead_time_min=body.lead_time_min,
+            nag_interval_min=body.nag_interval_min,
             recurrence=body.recurrence,
             recurrence_rule=body.recurrence_rule,
         )

@@ -65,6 +65,8 @@ class ReminderService:
         description: Optional[str] = None,
         profile: str = "meeting",
         escalate_to: Optional[str] = None,
+        lead_time_min: Optional[int] = None,
+        nag_interval_min: Optional[int] = None,
     ) -> Reminder:
         """Create a new reminder.
 
@@ -99,6 +101,8 @@ class ReminderService:
             source=source,
             profile=profile,
             escalate_to=escalate_to,
+            lead_time_min=lead_time_min,
+            nag_interval_min=nag_interval_min,
             state=ReminderState.PENDING,
         )
         return self._repo.create(reminder)

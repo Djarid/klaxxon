@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     source TEXT DEFAULT 'manual',
     profile TEXT DEFAULT 'meeting',
     escalate_to TEXT,
+    lead_time_min INTEGER,
+    nag_interval_min INTEGER,
     recurrence TEXT NOT NULL DEFAULT 'daily',
     recurrence_rule TEXT,
     is_active INTEGER DEFAULT 1,
@@ -56,6 +58,8 @@ def _row_to_schedule(row: sqlite3.Row) -> Schedule:
         source=row["source"],
         profile=row["profile"],
         escalate_to=row["escalate_to"],
+        lead_time_min=row["lead_time_min"],
+        nag_interval_min=row["nag_interval_min"],
         recurrence=row["recurrence"],
         recurrence_rule=row["recurrence_rule"],
         is_active=bool(row["is_active"]),
@@ -92,8 +96,8 @@ class SqliteScheduleRepository:
         cursor = conn.execute(
             """INSERT INTO schedules
             (title, description, time_of_day, duration_min, link, source, profile, escalate_to,
-             recurrence, recurrence_rule, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             lead_time_min, nag_interval_min, recurrence, recurrence_rule, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 schedule.title,
                 schedule.description,
@@ -103,6 +107,8 @@ class SqliteScheduleRepository:
                 schedule.source,
                 schedule.profile,
                 schedule.escalate_to,
+                schedule.lead_time_min,
+                schedule.nag_interval_min,
                 schedule.recurrence,
                 schedule.recurrence_rule,
                 1 if schedule.is_active else 0,
@@ -153,6 +159,8 @@ class SqliteScheduleRepository:
             "link",
             "profile",
             "escalate_to",
+            "lead_time_min",
+            "nag_interval_min",
             "recurrence",
             "recurrence_rule",
             "is_active",

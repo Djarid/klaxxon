@@ -223,3 +223,50 @@ def test_update_fields_nonexistent(repo: SqliteReminderRepository) -> None:
     """Test updating a nonexistent reminder returns None."""
     updated = repo.update_fields(999, {"title": "Nonexistent"})
     assert updated is None
+
+
+def test_create_reminder_with_timing_overrides(repo: SqliteReminderRepository) -> None:
+    """Test creating a reminder with lead_time_min and nag_interval_min."""
+    reminder = Reminder(
+        title="Custom Timing",
+        starts_at=_future(),
+        lead_time_min=10,
+        nag_interval_min=3,
+    )
+    created = repo.create(reminder)
+    assert created.id is not None
+    assert created.lead_time_min == 10
+    assert created.nag_interval_min == 3
+
+    # Verify persistence
+    fetched = repo.get(created.id)
+    assert fetched is not None
+    assert fetched.lead_time_min == 10
+    assert fetched.nag_interval_min == 3
+
+
+def test_update_timing_overrides(repo: SqliteReminderRepository) -> None:
+    """Test updating lead_time_min and nag_interval_min fields."""
+    reminder = Reminder(title="Test", starts_at=_future())
+    created = repo.create(reminder)
+    assert created.id is not None
+    assert created.lead_time_min is None
+    assert created.nag_interval_min is None
+
+    # Update timing overrides
+    updated = repo.update_fields(
+        created.id,
+        {
+            "lead_time_min": 15,
+            "nag_interval_min": 5,
+        },
+    )
+    assert updated is not None
+    assert updated.lead_time_min == 15
+    assert updated.nag_interval_min == 5
+
+    # Verify persistence
+    fetched = repo.get(created.id)
+    assert fetched is not None
+    assert fetched.lead_time_min == 15
+    assert fetched.nag_interval_min == 5

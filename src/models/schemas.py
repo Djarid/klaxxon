@@ -22,6 +22,8 @@ class ReminderCreate(BaseModel):
     source: str = Field(default="api", max_length=50)
     profile: str = Field(default="meeting", max_length=50)
     escalate_to: Optional[str] = Field(default=None, max_length=20)
+    lead_time_min: Optional[int] = Field(default=None, gt=0)
+    nag_interval_min: Optional[int] = Field(default=None, gt=0)
 
     @field_validator("escalate_to")
     @classmethod
@@ -50,6 +52,8 @@ class ReminderResponse(BaseModel):
     profile: str
     escalate_to: Optional[str]
     schedule_id: Optional[int]
+    lead_time_min: Optional[int]
+    nag_interval_min: Optional[int]
     state: ReminderState
     ack_keyword: Optional[str]
     ack_at: Optional[datetime]
@@ -76,6 +80,8 @@ class ReminderUpdate(BaseModel):
     link: Optional[str] = Field(default=None, max_length=2000)
     profile: Optional[str] = Field(default=None, max_length=50)
     escalate_to: Optional[str] = Field(default=None, max_length=20)
+    lead_time_min: Optional[int] = Field(default=None, gt=0)
+    nag_interval_min: Optional[int] = Field(default=None, gt=0)
 
     @field_validator("escalate_to")
     @classmethod
@@ -118,6 +124,8 @@ class ScheduleCreate(BaseModel):
     link: Optional[str] = Field(default=None, max_length=2000)
     profile: str = Field(default="meeting", max_length=50)
     escalate_to: Optional[str] = Field(default=None, max_length=20)
+    lead_time_min: Optional[int] = Field(default=None, gt=0)
+    nag_interval_min: Optional[int] = Field(default=None, gt=0)
     recurrence: str = Field(..., pattern=r"^(daily|weekly|custom)$")
     recurrence_rule: Optional[str] = Field(default=None, max_length=100)
 
@@ -170,6 +178,8 @@ class ScheduleUpdate(BaseModel):
     link: Optional[str] = Field(default=None, max_length=2000)
     profile: Optional[str] = Field(default=None, max_length=50)
     escalate_to: Optional[str] = Field(default=None, max_length=20)
+    lead_time_min: Optional[int] = Field(default=None, gt=0)
+    nag_interval_min: Optional[int] = Field(default=None, gt=0)
     recurrence: Optional[str] = Field(default=None, pattern=r"^(daily|weekly|custom)$")
     recurrence_rule: Optional[str] = Field(default=None, max_length=100)
     is_active: Optional[bool] = None
@@ -200,6 +210,8 @@ class ScheduleResponse(BaseModel):
     source: str
     profile: str
     escalate_to: Optional[str]
+    lead_time_min: Optional[int]
+    nag_interval_min: Optional[int]
     recurrence: str
     recurrence_rule: Optional[str]
     is_active: bool

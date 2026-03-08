@@ -58,6 +58,8 @@ class ScheduleService:
         link: Optional[str] = None,
         profile: str = "meeting",
         escalate_to: Optional[str] = None,
+        lead_time_min: Optional[int] = None,
+        nag_interval_min: Optional[int] = None,
         recurrence_rule: Optional[str] = None,
         source: str = "manual",
     ) -> Schedule:
@@ -104,6 +106,8 @@ class ScheduleService:
             source=source,
             profile=profile,
             escalate_to=escalate_to,
+            lead_time_min=lead_time_min,
+            nag_interval_min=nag_interval_min,
             recurrence=recurrence,
             recurrence_rule=recurrence_rule,
             is_active=True,
@@ -198,6 +202,8 @@ class ScheduleService:
                     source=schedule.source,
                     profile=schedule.profile,
                     escalate_to=schedule.escalate_to,
+                    lead_time_min=schedule.lead_time_min,
+                    nag_interval_min=schedule.nag_interval_min,
                     schedule_id=schedule.id,
                     state=ReminderState.PENDING,
                 )

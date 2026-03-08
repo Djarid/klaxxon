@@ -1731,3 +1731,256 @@ class TestPersistentProfileBehavior:
         assert len(mock_sender.messages) == 1
         _, text = mock_sender.messages[0]
         assert text == "Medication. Take 10mg Ramipril with water"
+
+
+class TestTimingOverrides:
+    """Test per-reminder timing overrides (lead_time_min and nag_interval_min)."""
+
+    @pytest.mark.asyncio
+    async def test_lead_time_override_fires_earlier(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+        mock_sender: MockSender,
+    ) -> None:
+        """Reminder with lead_time_min=10 fires 10 min before, not at profile's default."""
+        # Profile has first stage at -1 hour, but override is 10 minutes
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Quick Meeting",
+            starts_at=starts_at,
+            link="https://meet.example.com/quick",
+            lead_time_min=10,  # Override: start 10 min before
+        )
+        assert reminder.id is not None
+
+        # 11 minutes before start (before override trigger)
+        now = starts_at - timedelta(minutes=11)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 0
+
+        # 9 minutes before start (after override trigger)
+        now = starts_at - timedelta(minutes=9)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Quick Meeting" in text
+
+    @pytest.mark.asyncio
+    async def test_lead_time_override_none_uses_profile(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+        mock_sender: MockSender,
+    ) -> None:
+        """Reminder without lead_time_min uses profile stages."""
+        # Profile has first stage at -1 hour
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Normal Meeting",
+            starts_at=starts_at,
+            link="https://meet.example.com/normal",
+            # No lead_time_min override
+        )
+        assert reminder.id is not None
+
+        # 30 minutes before start (after -1 hour stage)
+        now = starts_at - timedelta(minutes=30)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+        _, text = mock_sender.messages[0]
+        assert "Normal Meeting" in text
+
+    @pytest.mark.asyncio
+    async def test_nag_interval_override(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Reminder with nag_interval_min=3 nags every 3 min instead of profile default."""
+        # Profile has stage at -15 min with 5 min interval, override to 3 min
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        reminder = service.create(
+            title="Urgent Meeting",
+            starts_at=starts_at,
+            link="https://meet.example.com/urgent",
+            nag_interval_min=3,  # Override: nag every 3 min
+        )
+        assert reminder.id is not None
+
+        # 14 minutes before start (in second stage)
+        now = starts_at - timedelta(minutes=14)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+
+        # Simulate 2 minutes passing (not enough for 3 min interval)
+        # Set sent_at to 2 minutes before current simulated time
+        conn = repo._get_conn()
+        old_time = (
+            starts_at - timedelta(minutes=12) - timedelta(minutes=2)
+        ).isoformat()
+        conn.execute(
+            "UPDATE reminder_log SET sent_at = ? WHERE reminder_id = ?",
+            (old_time, reminder.id),
+        )
+        conn.commit()
+
+        mock_sender.messages.clear()
+        now = starts_at - timedelta(minutes=12)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 0  # Not yet (need 3 min)
+
+        # Simulate 3 minutes passing (enough for 3 min interval)
+        # Set sent_at to 3+ minutes before current simulated time
+        old_time = (
+            starts_at - timedelta(minutes=11) - timedelta(minutes=4)
+        ).isoformat()
+        conn.execute(
+            "UPDATE reminder_log SET sent_at = ? WHERE reminder_id = ?",
+            (old_time, reminder.id),
+        )
+        conn.commit()
+
+        mock_sender.messages.clear()
+        now = starts_at - timedelta(minutes=11)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_nag_interval_override_none_uses_profile(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Reminder without nag_interval_min uses profile intervals."""
+        # Profile has stage at -15 min with 5 min interval
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        reminder = service.create(
+            title="Normal Meeting",
+            starts_at=starts_at,
+            link="https://meet.example.com/normal",
+            # No nag_interval_min override
+        )
+        assert reminder.id is not None
+
+        # 14 minutes before start (in second stage)
+        now = starts_at - timedelta(minutes=14)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+
+        # Simulate 3 minutes passing (not enough for 5 min interval)
+        # Set sent_at to 3 minutes before current simulated time
+        conn = repo._get_conn()
+        old_time = (
+            starts_at - timedelta(minutes=11) - timedelta(minutes=3)
+        ).isoformat()
+        conn.execute(
+            "UPDATE reminder_log SET sent_at = ? WHERE reminder_id = ?",
+            (old_time, reminder.id),
+        )
+        conn.commit()
+
+        mock_sender.messages.clear()
+        now = starts_at - timedelta(minutes=11)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 0
+
+        # Simulate 5 minutes passing (enough for 5 min interval)
+        # Set sent_at to 5+ minutes before current simulated time
+        old_time = (starts_at - timedelta(minutes=9) - timedelta(minutes=6)).isoformat()
+        conn.execute(
+            "UPDATE reminder_log SET sent_at = ? WHERE reminder_id = ?",
+            (old_time, reminder.id),
+        )
+        conn.commit()
+
+        mock_sender.messages.clear()
+        now = starts_at - timedelta(minutes=9)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_nag_interval_does_not_affect_single_pings(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Single-ping stages stay single-ping even with nag_interval override."""
+        # Profile has first stage at -1 hour with interval_min=None (single ping)
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        reminder = service.create(
+            title="Meeting",
+            starts_at=starts_at,
+            link="https://meet.example.com/test",
+            nag_interval_min=2,  # Should not affect single-ping stages
+        )
+        assert reminder.id is not None
+
+        # 59 minutes before start (in first stage)
+        now = starts_at - timedelta(minutes=59)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+
+        # Simulate 2 minutes passing
+        # Set sent_at to 2 minutes before current simulated time
+        conn = repo._get_conn()
+        old_time = (
+            starts_at - timedelta(minutes=57) - timedelta(minutes=2)
+        ).isoformat()
+        conn.execute(
+            "UPDATE reminder_log SET sent_at = ? WHERE reminder_id = ?",
+            (old_time, reminder.id),
+        )
+        conn.commit()
+
+        # 2 minutes later (should not fire again, stage is single-ping)
+        mock_sender.messages.clear()
+        now = starts_at - timedelta(minutes=57)
+        reminder = service.get(reminder.id)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 0
+
+    @pytest.mark.asyncio
+    async def test_both_overrides_together(
+        self,
+        engine: ReminderEngine,
+        service: ReminderService,
+        repo: SqliteReminderRepository,
+        mock_sender: MockSender,
+    ) -> None:
+        """Both lead_time and nag_interval set simultaneously."""
+        starts_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        reminder = service.create(
+            title="Custom Meeting",
+            starts_at=starts_at,
+            link="https://meet.example.com/custom",
+            lead_time_min=5,  # Start 5 min before
+            nag_interval_min=1,  # Nag every 1 min
+        )
+        assert reminder.id is not None
+
+        # 6 minutes before start (before override trigger)
+        now = starts_at - timedelta(minutes=6)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 0
+
+        # 4 minutes before start (after override trigger)
+        now = starts_at - timedelta(minutes=4)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1
+
+        # 1 minute later (should fire with 1 min nag interval)
+        mock_sender.messages.clear()
+        now = starts_at - timedelta(minutes=3)
+        await engine._process_reminder(reminder, now)
+        assert len(mock_sender.messages) == 1

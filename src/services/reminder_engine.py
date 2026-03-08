@@ -126,20 +126,65 @@ class ReminderEngine:
         """Check if any escalation stage should fire."""
         assert reminder.id is not None
 
-        # Find the most aggressive applicable stage
-        applicable_stage = None
-        for stage in profile.stages:
-            trigger_time = starts_at + timedelta(hours=stage.offset_hours)
-            if now >= trigger_time:
-                applicable_stage = stage
+        # Apply lead_time_min override if set
+        if reminder.lead_time_min is not None:
+            # Override: treat as if profile has a single first stage at -lead_time_min minutes
+            trigger_time = starts_at - timedelta(minutes=reminder.lead_time_min)
+            if now < trigger_time:
+                return  # Not time yet
 
-        if applicable_stage is None:
-            return
+            # Check if we've already sent the first reminder
+            last_sent = self._repo.get_last_reminder_time(reminder.id)
+            if last_sent is None or last_sent < trigger_time:
+                # Send first reminder using first stage's message template
+                first_stage = profile.stages[0] if profile.stages else None
+                if first_stage:
+                    msg = self._format_message(first_stage.message, reminder, now)
+                    sent = await self._send_to_recipients(
+                        reminder, msg, first_stage.target
+                    )
+                    if sent:
+                        self._repo.log_reminder(reminder.id, msg)
+                        if reminder.state == ReminderState.PENDING:
+                            self._service.mark_reminding(reminder.id)
+                return
 
-        # Check if we should send based on interval
+            # After first reminder, fall through to use profile stages for escalation
+            # (but skip stages that would have fired before lead_time_min)
+            # Find stages that should fire AFTER the lead_time trigger
+            applicable_stage = None
+            for stage in profile.stages:
+                stage_trigger = starts_at + timedelta(hours=stage.offset_hours)
+                if stage_trigger > trigger_time and now >= stage_trigger:
+                    applicable_stage = stage
+
+            if applicable_stage is None:
+                return
+        else:
+            # No override: use profile stages as-is
+            # Find the most aggressive applicable stage
+            applicable_stage = None
+            for stage in profile.stages:
+                trigger_time = starts_at + timedelta(hours=stage.offset_hours)
+                if now >= trigger_time:
+                    applicable_stage = stage
+
+            if applicable_stage is None:
+                return
+
+        # Check if we should send based on interval (with nag_interval_min override)
         last_sent = self._repo.get_last_reminder_time(reminder.id)
 
-        if applicable_stage.interval_min is None:
+        # Determine effective interval
+        effective_interval = applicable_stage.interval_min
+        if (
+            reminder.nag_interval_min is not None
+            and applicable_stage.interval_min is not None
+        ):
+            # Override the interval for repeating stages
+            effective_interval = reminder.nag_interval_min
+
+        if effective_interval is None:
             # Single ping: only send if we haven't sent in this stage
             trigger_time = starts_at + timedelta(hours=applicable_stage.offset_hours)
             if last_sent is not None and last_sent >= trigger_time:
@@ -147,7 +192,7 @@ class ReminderEngine:
         else:
             # Repeating: check interval
             if last_sent is not None:
-                next_send = last_sent + timedelta(minutes=applicable_stage.interval_min)
+                next_send = last_sent + timedelta(minutes=effective_interval)
                 if now < next_send:
                     return
 
@@ -167,9 +212,14 @@ class ReminderEngine:
         assert reminder.id is not None
         assert reminder.starts_at is not None
 
+        # Apply nag_interval_min override if set
+        effective_interval = profile.post_start_interval_min
+        if reminder.nag_interval_min is not None:
+            effective_interval = reminder.nag_interval_min
+
         last_sent = self._repo.get_last_reminder_time(reminder.id)
         if last_sent is not None:
-            next_send = last_sent + timedelta(minutes=profile.post_start_interval_min)
+            next_send = last_sent + timedelta(minutes=effective_interval)
             if now < next_send:
                 return
 
@@ -186,9 +236,14 @@ class ReminderEngine:
         assert reminder.starts_at is not None
         assert profile.overflow is not None
 
+        # Apply nag_interval_min override if set
+        effective_interval = profile.overflow.interval_min
+        if reminder.nag_interval_min is not None:
+            effective_interval = reminder.nag_interval_min
+
         last_sent = self._repo.get_last_reminder_time(reminder.id)
         if last_sent is not None:
-            next_send = last_sent + timedelta(minutes=profile.overflow.interval_min)
+            next_send = last_sent + timedelta(minutes=effective_interval)
             if now < next_send:
                 return
 

@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS reminders (
     profile TEXT NOT NULL DEFAULT 'meeting',
     escalate_to TEXT,
     schedule_id INTEGER,
+    lead_time_min INTEGER,
+    nag_interval_min INTEGER,
     state TEXT NOT NULL DEFAULT 'pending',
     ack_keyword TEXT,
     ack_at TEXT,
@@ -80,6 +82,8 @@ def _row_to_reminder(row: sqlite3.Row) -> Reminder:
         profile=row["profile"],
         escalate_to=row["escalate_to"],
         schedule_id=row["schedule_id"],
+        lead_time_min=row["lead_time_min"],
+        nag_interval_min=row["nag_interval_min"],
         state=ReminderState(row["state"]),
         ack_keyword=row["ack_keyword"],
         ack_at=_parse_dt(row["ack_at"]),
@@ -114,8 +118,8 @@ class SqliteReminderRepository(ReminderRepository):
         conn = self._get_conn()
         cursor = conn.execute(
             """INSERT INTO reminders
-            (title, description, starts_at, duration_min, link, source, profile, escalate_to, schedule_id, state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (title, description, starts_at, duration_min, link, source, profile, escalate_to, schedule_id, lead_time_min, nag_interval_min, state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 reminder.title,
                 reminder.description,
@@ -126,6 +130,8 @@ class SqliteReminderRepository(ReminderRepository):
                 reminder.profile,
                 reminder.escalate_to,
                 reminder.schedule_id,
+                reminder.lead_time_min,
+                reminder.nag_interval_min,
                 reminder.state.value,
                 now,
                 now,
@@ -268,6 +274,8 @@ class SqliteReminderRepository(ReminderRepository):
             "link",
             "profile",
             "escalate_to",
+            "lead_time_min",
+            "nag_interval_min",
         }
 
         # Filter to only allowed fields

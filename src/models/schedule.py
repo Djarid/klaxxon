@@ -20,6 +20,8 @@ class Schedule:
     source: str = "manual"
     profile: str = "meeting"
     escalate_to: Optional[str] = None
+    lead_time_min: Optional[int] = None
+    nag_interval_min: Optional[int] = None
     recurrence: str = "daily"  # daily, weekly, custom
     recurrence_rule: Optional[str] = None  # e.g. "mon,wed,fri"
     is_active: bool = True
