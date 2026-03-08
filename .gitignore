@@ -1,0 +1,27 @@
+# Environment
+.env
+.venv/
+__pycache__/
+*.pyc
+
+# Data
+*.db
+data/
+
+# Certs (generated at deploy time)
+deploy/certs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+.coverage
+.pytest_cache/

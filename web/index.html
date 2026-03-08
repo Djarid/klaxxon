@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klaxxon</title>
+    <link rel="stylesheet" href="style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body x-data="klaxxon()" x-init="init()">
+
+    <!-- Login screen -->
+    <template x-if="!authenticated">
+        <div class="login-screen">
+            <h1>KLAXXON</h1>
+            <p style="color: var(--text-muted); font-size: 0.9rem;">Meeting reminder service</p>
+
+            <div class="login-form">
+                <template x-if="error">
+                    <div class="alert alert-error" x-text="error"></div>
+                </template>
+
+                <div class="form-group">
+                    <label for="api-url">API URL</label>
+                    <input id="api-url" type="url" x-model="apiUrl"
+                           placeholder="https://klaxxon-api.local:8443"
+                           @keydown.enter="login()">
+                </div>
+                <div class="form-group">
+                    <label for="token">Bearer token</label>
+                    <input id="token" type="password" x-model="token"
+                           placeholder="Paste your API token"
+                           @keydown.enter="login()">
+                </div>
+                <button class="btn btn-primary" style="width:100%"
+                        @click="login()" :disabled="!token || !apiUrl">
+                    Connect
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Main app -->
+    <template x-if="authenticated">
+        <div class="container">
+            <header>
+                <h1>KLAXXON</h1>
+                <div class="health-bar">
+                    <span>
+                        <span class="status-dot" :class="health.signal_connected ? 'ok' : 'error'"></span>
+                        Signal
+                    </span>
+                    <span>
+                        <span class="status-dot" :class="health.db_ok ? 'ok' : 'error'"></span>
+                        DB
+                    </span>
+                    <span x-text="health.meetings_pending + ' pending'"></span>
+                    <span x-text="health.meetings_reminding + ' reminding'"></span>
+                    <button class="btn btn-sm" @click="logout()">Logout</button>
+                </div>
+            </header>
+
+            <!-- Alerts -->
+            <template x-if="error">
+                <div class="alert alert-error" x-text="error"></div>
+            </template>
+            <template x-if="success">
+                <div class="alert alert-success" x-text="success"></div>
+            </template>
+
+            <!-- New meeting form (collapsible) -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>Meetings</h2>
+                    <button class="btn btn-sm btn-primary"
+                            @click="showForm = !showForm"
+                            x-text="showForm ? 'Cancel' : '+ New'">
+                    </button>
+                </div>
+
+                <template x-if="showForm">
+                    <div class="panel">
+                        <div class="form-group">
+                            <label for="m-title">Title</label>
+                            <input id="m-title" type="text" x-model="form.title"
+                                   placeholder="Economy PWG" @keydown.enter="createMeeting()">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="m-date">Date &amp; time</label>
+                                <input id="m-date" type="datetime-local" x-model="form.starts_at">
+                            </div>
+                            <div class="form-group">
+                                <label for="m-duration">Duration (min)</label>
+                                <input id="m-duration" type="number" x-model.number="form.duration_min"
+                                       min="1" max="1440" placeholder="90">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="m-link">Meeting link (optional)</label>
+                            <input id="m-link" type="url" x-model="form.link"
+                                   placeholder="https://zoom.us/j/...">
+                        </div>
+                        <button class="btn btn-primary" @click="createMeeting()"
+                                :disabled="!form.title || !form.starts_at || creating">
+                            <span x-text="creating ? 'Creating...' : 'Create meeting'"></span>
+                        </button>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Meeting list -->
+            <div class="section">
+                <template x-if="meetings.length === 0">
+                    <div class="empty">No meetings. Add one above.</div>
+                </template>
+
+                <template x-for="m in meetings" :key="m.id">
+                    <div class="meeting-card" :class="m.state">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span class="badge" :class="'badge-' + m.state"
+                                  x-text="m.state"></span>
+                            <span class="title" x-text="m.title"></span>
+                        </div>
+
+                        <div class="meta">
+                            <span x-text="formatDate(m.starts_at)"></span>
+                            <span x-text="m.duration_min + ' min'"></span>
+                            <span x-text="'#' + m.id"></span>
+                            <span x-text="'via ' + m.source"></span>
+                        </div>
+
+                        <template x-if="m.link">
+                            <a class="meeting-link" :href="m.link" target="_blank"
+                               rel="noopener" x-text="m.link"></a>
+                        </template>
+
+                        <template x-if="m.ack_keyword">
+                            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                Acked with "<span x-text="m.ack_keyword"></span>"
+                                at <span x-text="formatDate(m.ack_at)"></span>
+                            </div>
+                        </template>
+
+                        <div class="actions">
+                            <template x-if="m.state === 'pending' || m.state === 'reminding'">
+                                <button class="btn btn-sm btn-success"
+                                        @click="ackMeeting(m.id)">Ack</button>
+                            </template>
+                            <template x-if="m.state === 'pending' || m.state === 'reminding'">
+                                <button class="btn btn-sm btn-warning"
+                                        @click="skipMeeting(m.id)">Skip</button>
+                            </template>
+                            <button class="btn btn-sm btn-danger"
+                                    @click="deleteMeeting(m.id)">Delete</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </template>
+
+<script>
+function klaxxon() {
+    return {
+        /* Auth state */
+        authenticated: false,
+        apiUrl: localStorage.getItem('klaxxon_api_url') || '',
+        token: localStorage.getItem('klaxxon_token') || '',
+
+        /* UI state */
+        error: '',
+        success: '',
+        showForm: false,
+        creating: false,
+
+        /* Data */
+        meetings: [],
+        health: {
+            status: 'unknown',
+            signal_connected: false,
+            db_ok: false,
+            meetings_pending: 0,
+            meetings_reminding: 0,
+        },
+
+        /* New meeting form */
+        form: {
+            title: '',
+            starts_at: '',
+            duration_min: 90,
+            link: '',
+        },
+
+        /* Polling */
+        _pollInterval: null,
+
+        init() {
+            if (this.token && this.apiUrl) {
+                this.authenticated = true;
+                this.refresh();
+                this._startPolling();
+            }
+        },
+
+        /* Auth */
+        async login() {
+            this.error = '';
+            try {
+                const resp = await this._fetch('/api/health');
+                if (resp.ok) {
+                    localStorage.setItem('klaxxon_token', this.token);
+                    localStorage.setItem('klaxxon_api_url', this.apiUrl);
+                    this.authenticated = true;
+                    this.refresh();
+                    this._startPolling();
+                } else if (resp.status === 401 || resp.status === 403) {
+                    this.error = 'Invalid token.';
+                } else {
+                    this.error = `API returned ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Connection failed: ${e.message}`;
+            }
+        },
+
+        logout() {
+            this.authenticated = false;
+            this.token = '';
+            this.meetings = [];
+            localStorage.removeItem('klaxxon_token');
+            localStorage.removeItem('klaxxon_api_url');
+            this._stopPolling();
+        },
+
+        /* Data loading */
+        async refresh() {
+            await Promise.all([this.loadMeetings(), this.loadHealth()]);
+        },
+
+        async loadMeetings() {
+            try {
+                const resp = await this._fetch('/api/meetings');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.meetings = data.meetings.sort((a, b) => {
+                        const order = { reminding: 0, pending: 1, acknowledged: 2, skipped: 3, missed: 4 };
+                        const stateA = order[a.state] ?? 5;
+                        const stateB = order[b.state] ?? 5;
+                        if (stateA !== stateB) return stateA - stateB;
+                        return new Date(a.starts_at) - new Date(b.starts_at);
+                    });
+                }
+            } catch (e) {
+                /* silent on poll failure */
+            }
+        },
+
+        async loadHealth() {
+            try {
+                const resp = await this._fetch('/api/health');
+                if (resp.ok) {
+                    this.health = await resp.json();
+                }
+            } catch (e) {
+                /* silent */
+            }
+        },
+
+        /* Actions */
+        async createMeeting() {
+            this.error = '';
+            this.success = '';
+            this.creating = true;
+
+            /* Convert local datetime to ISO with timezone */
+            const dt = new Date(this.form.starts_at);
+            const body = {
+                title: this.form.title,
+                starts_at: dt.toISOString(),
+                duration_min: this.form.duration_min || 90,
+                source: 'web',
+            };
+            if (this.form.link) body.link = this.form.link;
+
+            try {
+                const resp = await this._fetch('/api/meetings', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                });
+
+                if (resp.ok) {
+                    this.success = 'Meeting created.';
+                    this.form = { title: '', starts_at: '', duration_min: 90, link: '' };
+                    this.showForm = false;
+                    await this.refresh();
+                    this._clearAlerts();
+                } else {
+                    const err = await resp.json();
+                    this.error = err.detail || `Error ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Failed: ${e.message}`;
+            } finally {
+                this.creating = false;
+            }
+        },
+
+        async ackMeeting(id) {
+            this.error = '';
+            this.success = '';
+            try {
+                const resp = await this._fetch(`/api/meetings/${id}/ack`, {
+                    method: 'POST',
+                    body: JSON.stringify({ keyword: 'web' }),
+                });
+                if (resp.ok) {
+                    this.success = 'Meeting acknowledged.';
+                    await this.refresh();
+                    this._clearAlerts();
+                } else {
+                    const err = await resp.json();
+                    this.error = err.detail || `Error ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Failed: ${e.message}`;
+            }
+        },
+
+        async skipMeeting(id) {
+            this.error = '';
+            this.success = '';
+            try {
+                const resp = await this._fetch(`/api/meetings/${id}/skip`, {
+                    method: 'POST',
+                });
+                if (resp.ok) {
+                    this.success = 'Meeting skipped.';
+                    await this.refresh();
+                    this._clearAlerts();
+                } else {
+                    const err = await resp.json();
+                    this.error = err.detail || `Error ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Failed: ${e.message}`;
+            }
+        },
+
+        async deleteMeeting(id) {
+            this.error = '';
+            this.success = '';
+            try {
+                const resp = await this._fetch(`/api/meetings/${id}`, {
+                    method: 'DELETE',
+                });
+                if (resp.ok) {
+                    this.success = 'Meeting deleted.';
+                    await this.refresh();
+                    this._clearAlerts();
+                } else {
+                    const err = await resp.json();
+                    this.error = err.detail || `Error ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Failed: ${e.message}`;
+            }
+        },
+
+        /* Helpers */
+        formatDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            const day = d.toLocaleDateString('en-GB', {
+                weekday: 'short', day: 'numeric', month: 'short'
+            });
+            const time = d.toLocaleTimeString('en-GB', {
+                hour: '2-digit', minute: '2-digit'
+            });
+            return `${day} ${time}`;
+        },
+
+        _fetch(path, opts = {}) {
+            const url = this.apiUrl.replace(/\/$/, '') + path;
+            return fetch(url, {
+                ...opts,
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json',
+                    ...(opts.headers || {}),
+                },
+            });
+        },
+
+        _startPolling() {
+            this._stopPolling();
+            this._pollInterval = setInterval(() => this.refresh(), 30000);
+        },
+
+        _stopPolling() {
+            if (this._pollInterval) {
+                clearInterval(this._pollInterval);
+                this._pollInterval = null;
+            }
+        },
+
+        _clearAlerts() {
+            setTimeout(() => {
+                this.success = '';
+                this.error = '';
+            }, 4000);
+        },
+    };
+}
+</script>
+</body>
+</html>
