@@ -250,6 +250,53 @@ class SqliteReminderRepository(ReminderRepository):
             return None
         return _parse_dt(row["sent_at"])
 
+    def update_fields(self, reminder_id: int, fields: dict) -> Optional[Reminder]:
+        """Update specific fields on a reminder. Returns updated reminder or None if not found."""
+        if not fields:
+            return self.get(reminder_id)
+
+        # Whitelist of allowed column names (prevent SQL injection)
+        allowed_fields = {
+            "title",
+            "description",
+            "starts_at",
+            "duration_min",
+            "link",
+            "profile",
+            "escalate_to",
+        }
+
+        # Filter to only allowed fields
+        update_fields = {k: v for k, v in fields.items() if k in allowed_fields}
+        if not update_fields:
+            return self.get(reminder_id)
+
+        # Build dynamic UPDATE query
+        set_clauses = []
+        params = []
+        for field_name, value in update_fields.items():
+            set_clauses.append(f"{field_name} = ?")
+            # Convert datetime to ISO string if needed
+            if isinstance(value, datetime):
+                params.append(value.isoformat())
+            else:
+                params.append(value)
+
+        # Always update updated_at
+        set_clauses.append("updated_at = ?")
+        params.append(_now_utc())
+
+        # Add reminder_id to params
+        params.append(reminder_id)
+
+        query = f"UPDATE reminders SET {', '.join(set_clauses)} WHERE id = ?"
+
+        conn = self._get_conn()
+        conn.execute(query, params)
+        conn.commit()
+
+        return self.get(reminder_id)
+
     def close(self) -> None:
         """Close the database connection."""
         if self._conn is not None:

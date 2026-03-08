@@ -65,6 +65,31 @@ class ReminderListResponse(BaseModel):
     count: int
 
 
+class ReminderUpdate(BaseModel):
+    """Request body for updating a reminder (partial update)."""
+
+    title: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    starts_at: Optional[datetime] = None
+    duration_min: Optional[int] = Field(default=None, ge=1, le=1440)
+    link: Optional[str] = Field(default=None, max_length=2000)
+    profile: Optional[str] = Field(default=None, max_length=50)
+    escalate_to: Optional[str] = Field(default=None, max_length=20)
+
+    @field_validator("escalate_to")
+    @classmethod
+    def validate_escalate_to(cls, v: Optional[str]) -> Optional[str]:
+        """Validate E.164 phone number format."""
+        if v is None or v == "":
+            return None
+        # E.164: +[1-9][0-9]{6,14}
+        if not re.match(r"^\+[1-9]\d{6,14}$", v):
+            raise ValueError(
+                "escalate_to must be a valid E.164 phone number (e.g., +441234567890)"
+            )
+        return v
+
+
 class AckRequest(BaseModel):
     """Request body for acknowledging a reminder."""
 

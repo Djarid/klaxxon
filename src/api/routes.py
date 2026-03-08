@@ -17,9 +17,11 @@ from ..models.schemas import (
     ReminderCreate,
     ReminderListResponse,
     ReminderResponse,
+    ReminderUpdate,
 )
 from ..services.reminder_service import (
     DuplicateReminderError,
+    InvalidStateError,
     ReminderNotFoundError,
     ReminderService,
     PastReminderError,
@@ -122,6 +124,26 @@ async def skip_reminder(reminder_id: int) -> ReminderResponse:
         raise HTTPException(status_code=404, detail="Reminder not found")
     except InvalidTransitionError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    return ReminderResponse.model_validate(reminder)
+
+
+@router.patch("/reminders/{reminder_id}", response_model=ReminderResponse)
+async def update_reminder(reminder_id: int, body: ReminderUpdate) -> ReminderResponse:
+    """Update a reminder's fields (partial update)."""
+    svc = _get_service()
+
+    # Extract only non-None fields
+    fields = body.model_dump(exclude_none=True)
+
+    try:
+        reminder = svc.update(reminder_id, **fields)
+    except ReminderNotFoundError:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    except InvalidStateError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     return ReminderResponse.model_validate(reminder)
 
 

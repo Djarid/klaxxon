@@ -62,22 +62,23 @@
                 <div class="alert alert-success" x-text="success"></div>
             </template>
 
-            <!-- New reminder form (collapsible) -->
+            <!-- New/Edit reminder form (collapsible) -->
             <div class="section">
                 <div class="section-header">
                     <h2>Reminders</h2>
                     <button class="btn btn-sm btn-primary"
-                            @click="showForm = !showForm"
+                            @click="showForm = !showForm; editingId = null; resetForm()"
                             x-text="showForm ? 'Cancel' : '+ New'">
                     </button>
                 </div>
 
                 <template x-if="showForm">
                     <div class="panel">
+                        <h3 x-text="editingId ? 'Edit Reminder' : 'New Reminder'" style="margin-top: 0; margin-bottom: 1rem;"></h3>
                         <div class="form-group">
                             <label for="m-title">Title</label>
                             <input id="m-title" type="text" x-model="form.title"
-                                   placeholder="Economy PWG" @keydown.enter="createReminder()">
+                                   placeholder="Economy PWG" @keydown.enter="saveReminder()">
                         </div>
                         <div class="form-row">
                             <div class="form-group">
@@ -116,9 +117,9 @@
                                        placeholder="+441234567890">
                             </div>
                         </div>
-                        <button class="btn btn-primary" @click="createReminder()"
+                        <button class="btn btn-primary" @click="saveReminder()"
                                 :disabled="!form.title || !form.starts_at || creating">
-                            <span x-text="creating ? 'Creating...' : 'Create reminder'"></span>
+                            <span x-text="creating ? (editingId ? 'Updating...' : 'Creating...') : (editingId ? 'Update reminder' : 'Create reminder')"></span>
                         </button>
                     </div>
                 </template>
@@ -178,6 +179,10 @@
                                 <button class="btn btn-sm btn-warning"
                                         @click="skipReminder(r.id)">Skip</button>
                             </template>
+                            <template x-if="r.state === 'pending' || r.state === 'reminding'">
+                                <button class="btn btn-sm"
+                                        @click="startEdit(r)">Edit</button>
+                            </template>
                             <button class="btn btn-sm btn-danger"
                                     @click="deleteReminder(r.id)">Delete</button>
                         </div>
@@ -199,6 +204,7 @@ function klaxxon() {
         success: '',
         showForm: false,
         creating: false,
+        editingId: null,
 
         /* Data */
         reminders: [],
@@ -295,7 +301,28 @@ function klaxxon() {
         },
 
         /* Actions */
-        async createReminder() {
+        resetForm() {
+            this.form = { title: '', starts_at: '', duration_min: 90, link: '', description: '', profile: 'meeting', escalate_to: '' };
+        },
+
+        startEdit(reminder) {
+            this.editingId = reminder.id;
+            this.showForm = true;
+            /* Convert ISO datetime to local datetime-local format */
+            const dt = new Date(reminder.starts_at);
+            const localDt = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            this.form = {
+                title: reminder.title,
+                starts_at: localDt,
+                duration_min: reminder.duration_min,
+                link: reminder.link || '',
+                description: reminder.description || '',
+                profile: reminder.profile,
+                escalate_to: reminder.escalate_to || '',
+            };
+        },
+
+        async saveReminder() {
             this.error = '';
             this.success = '';
             this.creating = true;
@@ -306,22 +333,27 @@ function klaxxon() {
                 title: this.form.title,
                 starts_at: dt.toISOString(),
                 duration_min: this.form.duration_min || 90,
-                source: 'web',
                 profile: this.form.profile || 'meeting',
             };
+            if (!this.editingId) {
+                body.source = 'web';
+            }
             if (this.form.link) body.link = this.form.link;
             if (this.form.description) body.description = this.form.description;
             if (this.form.escalate_to) body.escalate_to = this.form.escalate_to;
 
             try {
-                const resp = await this._fetch('/api/reminders', {
-                    method: 'POST',
+                const method = this.editingId ? 'PATCH' : 'POST';
+                const url = this.editingId ? `/api/reminders/${this.editingId}` : '/api/reminders';
+                const resp = await this._fetch(url, {
+                    method: method,
                     body: JSON.stringify(body),
                 });
 
                 if (resp.ok) {
-                    this.success = 'Reminder created.';
-                    this.form = { title: '', starts_at: '', duration_min: 90, link: '', description: '', profile: 'meeting', escalate_to: '' };
+                    this.success = this.editingId ? 'Reminder updated.' : 'Reminder created.';
+                    this.resetForm();
+                    this.editingId = null;
                     this.showForm = false;
                     await this.refresh();
                     this._clearAlerts();

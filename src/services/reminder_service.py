@@ -38,6 +38,12 @@ class PastReminderError(Exception):
     pass
 
 
+class InvalidStateError(Exception):
+    """Raised when an operation is not allowed in the current state."""
+
+    pass
+
+
 class ReminderService:
     """Business logic for reminder operations.
 
@@ -173,3 +179,23 @@ class ReminderService:
     def count_reminding(self) -> int:
         """Count reminders in reminding state."""
         return self._repo.count_by_state(ReminderState.REMINDING)
+
+    def update(self, reminder_id: int, **fields) -> Reminder:
+        """Update a reminder's fields. Only allowed on PENDING or REMINDING reminders."""
+        # Fetch the reminder
+        reminder = self.get(reminder_id)
+
+        # Check state: only PENDING or REMINDING can be edited
+        if reminder.state not in (ReminderState.PENDING, ReminderState.REMINDING):
+            raise InvalidStateError(
+                f"Cannot edit reminder in {reminder.state.value} state. "
+                "Only PENDING or REMINDING reminders can be edited."
+            )
+
+        # Call repository update
+        updated = self._repo.update_fields(reminder_id, fields)
+        if updated is None:
+            raise ReminderNotFoundError(f"Reminder {reminder_id} not found")
+
+        logger.info("Reminder %d updated: %s", reminder_id, list(fields.keys()))
+        return updated

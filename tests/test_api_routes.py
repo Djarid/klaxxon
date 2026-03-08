@@ -666,3 +666,134 @@ def test_create_reminder_with_invalid_escalate_to(
     payload["escalate_to"] = "+0441234567890"
     response = client.post("/api/reminders", json=payload, headers=auth_headers)
     assert response.status_code == 422
+
+
+# ============================================================================
+# PATCH /api/reminders/{id} - Update Reminder
+# ============================================================================
+
+
+def test_update_reminder_title(
+    client: TestClient, auth_headers: dict, future_time: datetime
+) -> None:
+    """PATCH /api/reminders/{id} with new title returns 200 with updated reminder."""
+    # Create a reminder
+    payload = {"title": "Original Title", "starts_at": future_time.isoformat()}
+    create_resp = client.post("/api/reminders", json=payload, headers=auth_headers)
+    reminder_id = create_resp.json()["id"]
+
+    # Update the title
+    update_payload = {"title": "Updated Title"}
+    response = client.patch(
+        f"/api/reminders/{reminder_id}", json=update_payload, headers=auth_headers
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == reminder_id
+    assert data["title"] == "Updated Title"
+    assert data["state"] == "pending"
+
+
+def test_update_reminder_multiple_fields(
+    client: TestClient, auth_headers: dict, future_time: datetime
+) -> None:
+    """PATCH /api/reminders/{id} with multiple fields updates all provided fields."""
+    # Create a reminder
+    payload = {
+        "title": "Original",
+        "starts_at": future_time.isoformat(),
+        "link": "https://old.example.com",
+    }
+    create_resp = client.post("/api/reminders", json=payload, headers=auth_headers)
+    reminder_id = create_resp.json()["id"]
+
+    # Update multiple fields
+    update_payload = {
+        "title": "Updated Title",
+        "description": "New description",
+        "link": "https://new.example.com",
+    }
+    response = client.patch(
+        f"/api/reminders/{reminder_id}", json=update_payload, headers=auth_headers
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == reminder_id
+    assert data["title"] == "Updated Title"
+    assert data["description"] == "New description"
+    assert data["link"] == "https://new.example.com"
+
+
+def test_update_reminder_profile(
+    client: TestClient, auth_headers: dict, future_time: datetime
+) -> None:
+    """PATCH /api/reminders/{id} with new profile."""
+    # Create a reminder with default profile
+    payload = {"title": "Test", "starts_at": future_time.isoformat()}
+    create_resp = client.post("/api/reminders", json=payload, headers=auth_headers)
+    reminder_id = create_resp.json()["id"]
+
+    # Update the profile
+    update_payload = {"profile": "persistent"}
+    response = client.patch(
+        f"/api/reminders/{reminder_id}", json=update_payload, headers=auth_headers
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["profile"] == "persistent"
+
+
+def test_update_reminder_escalate_to(
+    client: TestClient, auth_headers: dict, future_time: datetime
+) -> None:
+    """PATCH /api/reminders/{id} with valid E.164 escalate_to number."""
+    # Create a reminder
+    payload = {"title": "Test", "starts_at": future_time.isoformat()}
+    create_resp = client.post("/api/reminders", json=payload, headers=auth_headers)
+    reminder_id = create_resp.json()["id"]
+
+    # Update escalate_to
+    update_payload = {"escalate_to": "+447700900456"}
+    response = client.patch(
+        f"/api/reminders/{reminder_id}", json=update_payload, headers=auth_headers
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["escalate_to"] == "+447700900456"
+
+
+def test_update_reminder_not_found(client: TestClient, auth_headers: dict) -> None:
+    """PATCH /api/reminders/{id} with nonexistent id returns 404."""
+    update_payload = {"title": "Updated"}
+    response = client.patch(
+        "/api/reminders/99999", json=update_payload, headers=auth_headers
+    )
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_update_reminder_terminal_state(
+    client: TestClient, auth_headers: dict, future_time: datetime
+) -> None:
+    """PATCH /api/reminders/{id} on acknowledged reminder returns 409."""
+    # Create and acknowledge a reminder
+    payload = {"title": "Test", "starts_at": future_time.isoformat()}
+    create_resp = client.post("/api/reminders", json=payload, headers=auth_headers)
+    reminder_id = create_resp.json()["id"]
+
+    # Acknowledge it
+    client.post(f"/api/reminders/{reminder_id}/ack", headers=auth_headers)
+
+    # Try to update it
+    update_payload = {"title": "Should Fail"}
+    response = client.patch(
+        f"/api/reminders/{reminder_id}", json=update_payload, headers=auth_headers
+    )
+
+    assert response.status_code == 409
+    assert "cannot edit" in response.json()["detail"].lower()

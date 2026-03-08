@@ -170,3 +170,56 @@ def test_create_reminder_default_profile(repo: SqliteReminderRepository) -> None
     assert fetched is not None
     assert fetched.profile == "meeting"
     assert fetched.escalate_to is None
+
+
+def test_update_fields_single_field(repo: SqliteReminderRepository) -> None:
+    """Test updating a single field on a reminder."""
+    reminder = Reminder(title="Original", starts_at=_future())
+    created = repo.create(reminder)
+    assert created.id is not None
+
+    # Update just the title
+    updated = repo.update_fields(created.id, {"title": "Updated Title"})
+    assert updated is not None
+    assert updated.title == "Updated Title"
+    assert updated.id == created.id
+
+    # Verify persistence
+    fetched = repo.get(created.id)
+    assert fetched is not None
+    assert fetched.title == "Updated Title"
+
+
+def test_update_fields_multiple_fields(repo: SqliteReminderRepository) -> None:
+    """Test updating multiple fields on a reminder."""
+    reminder = Reminder(
+        title="Original",
+        description="Old description",
+        starts_at=_future(),
+        link="https://old.example.com",
+    )
+    created = repo.create(reminder)
+    assert created.id is not None
+
+    # Update multiple fields
+    new_time = _future(2)
+    updated = repo.update_fields(
+        created.id,
+        {
+            "title": "New Title",
+            "description": "New description",
+            "link": "https://new.example.com",
+            "starts_at": new_time,
+        },
+    )
+    assert updated is not None
+    assert updated.title == "New Title"
+    assert updated.description == "New description"
+    assert updated.link == "https://new.example.com"
+    assert updated.starts_at == new_time
+
+
+def test_update_fields_nonexistent(repo: SqliteReminderRepository) -> None:
+    """Test updating a nonexistent reminder returns None."""
+    updated = repo.update_fields(999, {"title": "Nonexistent"})
+    assert updated is None

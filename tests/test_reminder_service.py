@@ -7,6 +7,7 @@ import pytest
 from src.models.reminder import ReminderState
 from src.services.reminder_service import (
     DuplicateReminderError,
+    InvalidStateError,
     ReminderNotFoundError,
     ReminderService,
     PastReminderError,
@@ -141,3 +142,33 @@ class TestCounts:
         m = service.create(title="A", starts_at=_future())
         service.mark_reminding(m.id)  # type: ignore
         assert service.count_reminding() == 1
+
+
+class TestUpdate:
+    def test_update_reminder_pending(self, service: ReminderService) -> None:
+        """Update fields on a pending reminder."""
+        m = service.create(title="Original", starts_at=_future())
+        updated = service.update(m.id, title="Updated", description="New description")  # type: ignore
+        assert updated.title == "Updated"
+        assert updated.description == "New description"
+        assert updated.state == ReminderState.PENDING
+
+    def test_update_reminder_reminding(self, service: ReminderService) -> None:
+        """Update fields on a reminding reminder."""
+        m = service.create(title="Original", starts_at=_future())
+        service.mark_reminding(m.id)  # type: ignore
+        updated = service.update(m.id, title="Updated Title")  # type: ignore
+        assert updated.title == "Updated Title"
+        assert updated.state == ReminderState.REMINDING
+
+    def test_update_reminder_acknowledged_fails(self, service: ReminderService) -> None:
+        """Update on acknowledged reminder raises InvalidStateError."""
+        m = service.create(title="Test", starts_at=_future())
+        service.acknowledge(m.id, "ack")  # type: ignore
+        with pytest.raises(InvalidStateError, match="Cannot edit"):
+            service.update(m.id, title="Should Fail")  # type: ignore
+
+    def test_update_reminder_not_found(self, service: ReminderService) -> None:
+        """Update on nonexistent reminder raises ReminderNotFoundError."""
+        with pytest.raises(ReminderNotFoundError):
+            service.update(999, title="Nonexistent")

@@ -63,3 +63,8 @@ class ReminderRepository(ABC):
     def count_by_state(self, state: ReminderState) -> int:
         """Count reminders in a given state."""
         ...
+
+    @abstractmethod
+    def update_fields(self, reminder_id: int, fields: dict) -> Optional[Reminder]:
+        """Update specific fields on a reminder. Returns updated reminder or None if not found."""
+        ...
