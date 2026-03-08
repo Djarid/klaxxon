@@ -148,6 +148,9 @@
                             <span x-text="r.duration_min + ' min'"></span>
                             <span x-text="'#' + r.id"></span>
                             <span x-text="'via ' + r.source"></span>
+                            <template x-if="r.schedule_id">
+                                <span x-text="'from: Schedule #' + r.schedule_id"></span>
+                            </template>
                             <template x-if="r.escalate_to">
                                 <span x-text="'escalate: ' + r.escalate_to"></span>
                             </template>
@@ -189,6 +192,139 @@
                     </div>
                 </template>
             </div>
+
+            <!-- Schedules section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>Schedules</h2>
+                    <button class="btn btn-sm btn-primary"
+                            @click="showScheduleForm = !showScheduleForm; editingScheduleId = null; resetScheduleForm()"
+                            x-text="showScheduleForm ? 'Cancel' : '+ New'">
+                    </button>
+                </div>
+
+                <template x-if="showScheduleForm">
+                    <div class="panel">
+                        <h3 x-text="editingScheduleId ? 'Edit Schedule' : 'New Schedule'" style="margin-top: 0; margin-bottom: 1rem;"></h3>
+                        <div class="form-group">
+                            <label for="s-title">Title</label>
+                            <input id="s-title" type="text" x-model="scheduleForm.title"
+                                   placeholder="Daily medication" @keydown.enter="saveSchedule()">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="s-time">Time of day</label>
+                                <input id="s-time" type="time" x-model="scheduleForm.time_of_day">
+                            </div>
+                            <div class="form-group">
+                                <label for="s-duration">Duration (min)</label>
+                                <input id="s-duration" type="number" x-model.number="scheduleForm.duration_min"
+                                       min="0" max="1440" placeholder="0">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="s-description">Notes (optional)</label>
+                            <textarea id="s-description" x-model="scheduleForm.description"
+                                      placeholder="Optional notes or description"
+                                      rows="3"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="s-link">Link (optional)</label>
+                            <input id="s-link" type="url" x-model="scheduleForm.link"
+                                   placeholder="https://...">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="s-profile">Profile</label>
+                                <select id="s-profile" x-model="scheduleForm.profile">
+                                    <option value="meeting">Meeting</option>
+                                    <option value="persistent">Persistent</option>
+                                    <option value="gentle">Gentle</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="s-escalate">Escalate to (optional)</label>
+                                <input id="s-escalate" type="tel" x-model="scheduleForm.escalate_to"
+                                       placeholder="+441234567890">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="s-recurrence">Recurrence</label>
+                                <select id="s-recurrence" x-model="scheduleForm.recurrence">
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                            <div class="form-group" x-show="scheduleForm.recurrence === 'weekly' || scheduleForm.recurrence === 'custom'">
+                                <label for="s-rule">Days (comma-separated)</label>
+                                <input id="s-rule" type="text" x-model="scheduleForm.recurrence_rule"
+                                       placeholder="mon,wed,fri">
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" @click="saveSchedule()"
+                                :disabled="!scheduleForm.title || !scheduleForm.time_of_day || creating">
+                            <span x-text="creating ? (editingScheduleId ? 'Updating...' : 'Creating...') : (editingScheduleId ? 'Update schedule' : 'Create schedule')"></span>
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Schedule list -->
+                <template x-if="schedules.length === 0">
+                    <div class="empty">No schedules. Add one above.</div>
+                </template>
+
+                <template x-for="s in schedules" :key="s.id">
+                    <div class="reminder-card" :class="s.is_active ? '' : 'inactive'">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span class="title" x-text="s.title"></span>
+                            <span class="badge" style="background: var(--primary); color: white;"
+                                  x-text="s.recurrence"></span>
+                            <template x-if="s.profile !== 'meeting'">
+                                <span class="badge" style="background: var(--primary); color: white;"
+                                      x-text="s.profile"></span>
+                            </template>
+                            <template x-if="!s.is_active">
+                                <span class="badge" style="background: var(--text-muted); color: white;">inactive</span>
+                            </template>
+                        </div>
+
+                        <div class="meta">
+                            <span x-text="s.time_of_day"></span>
+                            <template x-if="s.recurrence_rule">
+                                <span x-text="s.recurrence_rule"></span>
+                            </template>
+                            <span x-text="'#' + s.id"></span>
+                        </div>
+
+                        <template x-if="s.link">
+                            <a class="reminder-link" :href="s.link" target="_blank"
+                               rel="noopener" x-text="s.link"></a>
+                        </template>
+
+                        <template x-if="s.description">
+                            <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; white-space: pre-wrap;"
+                                 x-text="s.description"></div>
+                        </template>
+
+                        <div class="actions">
+                            <button class="btn btn-sm"
+                                    @click="startEditSchedule(s)">Edit</button>
+                            <template x-if="s.is_active">
+                                <button class="btn btn-sm btn-warning"
+                                        @click="toggleSchedule(s.id, false)">Deactivate</button>
+                            </template>
+                            <template x-if="!s.is_active">
+                                <button class="btn btn-sm btn-success"
+                                        @click="toggleSchedule(s.id, true)">Activate</button>
+                            </template>
+                            <button class="btn btn-sm btn-danger"
+                                    @click="deleteSchedule(s.id)">Delete</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
         </div>
     </template>
 
@@ -203,11 +339,14 @@ function klaxxon() {
         error: '',
         success: '',
         showForm: false,
+        showScheduleForm: false,
         creating: false,
         editingId: null,
+        editingScheduleId: null,
 
         /* Data */
         reminders: [],
+        schedules: [],
         health: {
             status: 'unknown',
             signal_connected: false,
@@ -225,6 +364,19 @@ function klaxxon() {
             description: '',
             profile: 'meeting',
             escalate_to: '',
+        },
+
+        /* New schedule form */
+        scheduleForm: {
+            title: '',
+            time_of_day: '09:00',
+            duration_min: 0,
+            link: '',
+            description: '',
+            profile: 'meeting',
+            escalate_to: '',
+            recurrence: 'daily',
+            recurrence_rule: '',
         },
 
         /* Polling */
@@ -268,7 +420,7 @@ function klaxxon() {
 
         /* Data loading */
         async refresh() {
-            await Promise.all([this.loadReminders(), this.loadHealth()]);
+            await Promise.all([this.loadReminders(), this.loadSchedules(), this.loadHealth()]);
         },
 
         async loadReminders() {
@@ -282,6 +434,21 @@ function klaxxon() {
                         const stateB = order[b.state] ?? 5;
                         if (stateA !== stateB) return stateA - stateB;
                         return new Date(a.starts_at) - new Date(b.starts_at);
+                    });
+                }
+            } catch (e) {
+                /* silent on poll failure */
+            }
+        },
+
+        async loadSchedules() {
+            try {
+                const resp = await this._fetch('/api/schedules?active_only=false');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.schedules = data.schedules.sort((a, b) => {
+                        if (a.is_active !== b.is_active) return b.is_active - a.is_active;
+                        return a.time_of_day.localeCompare(b.time_of_day);
                     });
                 }
             } catch (e) {
@@ -303,6 +470,10 @@ function klaxxon() {
         /* Actions */
         resetForm() {
             this.form = { title: '', starts_at: '', duration_min: 90, link: '', description: '', profile: 'meeting', escalate_to: '' };
+        },
+
+        resetScheduleForm() {
+            this.scheduleForm = { title: '', time_of_day: '09:00', duration_min: 0, link: '', description: '', profile: 'meeting', escalate_to: '', recurrence: 'daily', recurrence_rule: '' };
         },
 
         startEdit(reminder) {
@@ -418,6 +589,107 @@ function klaxxon() {
                 });
                 if (resp.ok) {
                     this.success = 'Reminder deleted.';
+                    await this.refresh();
+                    this._clearAlerts();
+                } else {
+                    const err = await resp.json();
+                    this.error = err.detail || `Error ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Failed: ${e.message}`;
+            }
+        },
+
+        /* Schedule actions */
+        startEditSchedule(schedule) {
+            this.editingScheduleId = schedule.id;
+            this.showScheduleForm = true;
+            this.scheduleForm = {
+                title: schedule.title,
+                time_of_day: schedule.time_of_day,
+                duration_min: schedule.duration_min,
+                link: schedule.link || '',
+                description: schedule.description || '',
+                profile: schedule.profile,
+                escalate_to: schedule.escalate_to || '',
+                recurrence: schedule.recurrence,
+                recurrence_rule: schedule.recurrence_rule || '',
+            };
+        },
+
+        async saveSchedule() {
+            this.error = '';
+            this.success = '';
+            this.creating = true;
+
+            const body = {
+                title: this.scheduleForm.title,
+                time_of_day: this.scheduleForm.time_of_day,
+                duration_min: this.scheduleForm.duration_min || 0,
+                profile: this.scheduleForm.profile || 'meeting',
+                recurrence: this.scheduleForm.recurrence,
+            };
+            if (this.scheduleForm.link) body.link = this.scheduleForm.link;
+            if (this.scheduleForm.description) body.description = this.scheduleForm.description;
+            if (this.scheduleForm.escalate_to) body.escalate_to = this.scheduleForm.escalate_to;
+            if (this.scheduleForm.recurrence_rule) body.recurrence_rule = this.scheduleForm.recurrence_rule;
+
+            try {
+                const method = this.editingScheduleId ? 'PATCH' : 'POST';
+                const url = this.editingScheduleId ? `/api/schedules/${this.editingScheduleId}` : '/api/schedules';
+                const resp = await this._fetch(url, {
+                    method: method,
+                    body: JSON.stringify(body),
+                });
+
+                if (resp.ok) {
+                    this.success = this.editingScheduleId ? 'Schedule updated.' : 'Schedule created.';
+                    this.resetScheduleForm();
+                    this.editingScheduleId = null;
+                    this.showScheduleForm = false;
+                    await this.refresh();
+                    this._clearAlerts();
+                } else {
+                    const err = await resp.json();
+                    this.error = err.detail || `Error ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Failed: ${e.message}`;
+            } finally {
+                this.creating = false;
+            }
+        },
+
+        async toggleSchedule(id, active) {
+            this.error = '';
+            this.success = '';
+            try {
+                const resp = await this._fetch(`/api/schedules/${id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_active: active }),
+                });
+                if (resp.ok) {
+                    this.success = active ? 'Schedule activated.' : 'Schedule deactivated.';
+                    await this.refresh();
+                    this._clearAlerts();
+                } else {
+                    const err = await resp.json();
+                    this.error = err.detail || `Error ${resp.status}`;
+                }
+            } catch (e) {
+                this.error = `Failed: ${e.message}`;
+            }
+        },
+
+        async deleteSchedule(id) {
+            this.error = '';
+            this.success = '';
+            try {
+                const resp = await this._fetch(`/api/schedules/${id}`, {
+                    method: 'DELETE',
+                });
+                if (resp.ok) {
+                    this.success = 'Schedule deleted.';
                     await this.refresh();
                     this._clearAlerts();
                 } else {

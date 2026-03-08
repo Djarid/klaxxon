@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     source TEXT NOT NULL DEFAULT 'manual',
     profile TEXT NOT NULL DEFAULT 'meeting',
     escalate_to TEXT,
+    schedule_id INTEGER,
     state TEXT NOT NULL DEFAULT 'pending',
     ack_keyword TEXT,
     ack_at TEXT,
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_reminders_state ON reminders(state);
 CREATE INDEX IF NOT EXISTS idx_reminders_starts_at ON reminders(starts_at);
+CREATE INDEX IF NOT EXISTS idx_reminders_schedule_id ON reminders(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_reminder_log_reminder ON reminder_log(reminder_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_hash ON auth_tokens(token_hash);
 """
@@ -77,6 +79,7 @@ def _row_to_reminder(row: sqlite3.Row) -> Reminder:
         source=row["source"],
         profile=row["profile"],
         escalate_to=row["escalate_to"],
+        schedule_id=row["schedule_id"],
         state=ReminderState(row["state"]),
         ack_keyword=row["ack_keyword"],
         ack_at=_parse_dt(row["ack_at"]),
@@ -111,8 +114,8 @@ class SqliteReminderRepository(ReminderRepository):
         conn = self._get_conn()
         cursor = conn.execute(
             """INSERT INTO reminders
-            (title, description, starts_at, duration_min, link, source, profile, escalate_to, state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (title, description, starts_at, duration_min, link, source, profile, escalate_to, schedule_id, state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 reminder.title,
                 reminder.description,
@@ -122,6 +125,7 @@ class SqliteReminderRepository(ReminderRepository):
                 reminder.source,
                 reminder.profile,
                 reminder.escalate_to,
+                reminder.schedule_id,
                 reminder.state.value,
                 now,
                 now,
@@ -296,6 +300,29 @@ class SqliteReminderRepository(ReminderRepository):
         conn.commit()
 
         return self.get(reminder_id)
+
+    def find_by_schedule_and_time(
+        self, schedule_id: int, starts_at: datetime
+    ) -> Optional[Reminder]:
+        """Find a reminder by schedule_id and starts_at (for deduplication during spawning).
+
+        Uses 1-minute tolerance for time matching.
+        """
+        conn = self._get_conn()
+        # Get all reminders for this schedule
+        rows = conn.execute(
+            "SELECT * FROM reminders WHERE schedule_id = ?", (schedule_id,)
+        ).fetchall()
+
+        # Check each for time match within 1 minute
+        for row in rows:
+            reminder = _row_to_reminder(row)
+            if reminder.starts_at:
+                diff = abs((reminder.starts_at - starts_at).total_seconds())
+                if diff < 60:
+                    return reminder
+
+        return None
 
     def close(self) -> None:
         """Close the database connection."""

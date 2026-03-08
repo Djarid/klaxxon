@@ -31,6 +31,7 @@ class Reminder:
     source: str = "manual"
     profile: str = "meeting"
     escalate_to: Optional[str] = None
+    schedule_id: Optional[int] = None
     state: ReminderState = ReminderState.PENDING
     ack_keyword: Optional[str] = None
     ack_at: Optional[datetime] = None

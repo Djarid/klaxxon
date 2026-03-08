@@ -1,7 +1,7 @@
-"""Abstract repository interface for reminder storage.
+"""Abstract repository interfaces for reminder and schedule storage.
 
-Dependency Inversion: high-level modules (ReminderService, ReminderEngine)
-depend on this ABC, not on the concrete SQLite implementation.
+Dependency Inversion: high-level modules (ReminderService, ReminderEngine, ScheduleService)
+depend on these ABCs, not on the concrete SQLite implementations.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from ..models.reminder import Reminder, ReminderState
+from ..models.schedule import Schedule
 
 
 class ReminderRepository(ABC):
@@ -67,4 +68,33 @@ class ReminderRepository(ABC):
     @abstractmethod
     def update_fields(self, reminder_id: int, fields: dict) -> Optional[Reminder]:
         """Update specific fields on a reminder. Returns updated reminder or None if not found."""
+        ...
+
+
+class ScheduleRepository(ABC):
+    """Abstract interface for schedule persistence."""
+
+    @abstractmethod
+    def create(self, schedule: Schedule) -> Schedule:
+        """Persist a new schedule. Returns the schedule with id populated."""
+        ...
+
+    @abstractmethod
+    def get(self, schedule_id: int) -> Optional[Schedule]:
+        """Retrieve a schedule by id. Returns None if not found."""
+        ...
+
+    @abstractmethod
+    def list(self, active_only: bool = True) -> list[Schedule]:
+        """List schedules, optionally filtered by active status."""
+        ...
+
+    @abstractmethod
+    def update_fields(self, schedule_id: int, fields: dict) -> Optional[Schedule]:
+        """Update specific fields on a schedule. Returns updated schedule or None if not found."""
+        ...
+
+    @abstractmethod
+    def deactivate(self, schedule_id: int) -> bool:
+        """Deactivate a schedule (soft delete). Returns True if successful."""
         ...

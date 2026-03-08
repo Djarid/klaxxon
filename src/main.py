@@ -18,7 +18,9 @@ from .api import routes
 from .api.auth import register_token
 from .config import AppConfig, load_config
 from .repository.sqlite import SqliteReminderRepository
+from .repository.schedule_sqlite import SqliteScheduleRepository
 from .services.reminder_service import ReminderService
+from .services.schedule_service import ScheduleService
 from .services.notification.signal_client import SignalClient
 from .services.reminder_engine import ReminderEngine
 from .signal_handler import SignalHandler
@@ -27,13 +29,15 @@ logger = logging.getLogger(__name__)
 
 # Module-level references for the background tasks
 _reminder_engine: ReminderEngine | None = None
+_schedule_service: ScheduleService | None = None
 _signal_handler: SignalHandler | None = None
 _config: AppConfig | None = None
 
 
 async def _scheduler_loop() -> None:
-    """Background loop: runs reminder engine and signal handler."""
+    """Background loop: runs reminder engine, schedule spawner, and signal handler."""
     assert _reminder_engine is not None
+    assert _schedule_service is not None
     assert _signal_handler is not None
     assert _config is not None
 
@@ -47,6 +51,12 @@ async def _scheduler_loop() -> None:
             logger.exception("Reminder engine error")
 
         try:
+            # Spawn reminders from schedules (synchronous call)
+            _schedule_service.spawn_reminders()
+        except Exception:
+            logger.exception("Schedule spawner error")
+
+        try:
             await _signal_handler.poll()
         except Exception:
             logger.exception("Signal handler error")
@@ -57,22 +67,29 @@ async def _scheduler_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown."""
-    global _reminder_engine, _signal_handler, _config
+    global _reminder_engine, _schedule_service, _signal_handler, _config
 
     config_path = Path(__file__).resolve().parent.parent / "config.yaml"
     _config = load_config(config_path)
 
     # Wire up concretions (Dependency Inversion: only here)
-    repo = SqliteReminderRepository(_config.db_path)
+    reminder_repo = SqliteReminderRepository(_config.db_path)
+    schedule_repo = SqliteScheduleRepository(_config.db_path)
     signal_client = SignalClient(
         api_url=_config.signal_api_url,
         account=_config.signal_account,
     )
-    service = ReminderService(repo)
+    service = ReminderService(reminder_repo)
+
+    _schedule_service = ScheduleService(
+        schedule_repo=schedule_repo,
+        reminder_repo=reminder_repo,
+        timezone_name=_config.timezone,
+    )
 
     _reminder_engine = ReminderEngine(
         service=service,
-        repository=repo,
+        repository=reminder_repo,
         sender=signal_client,
         recipient=_config.signal_recipient,
         escalation_profiles=_config.escalation_profiles,
@@ -98,6 +115,7 @@ async def lifespan(app: FastAPI):
     # Set route dependencies
     routes.set_dependencies(
         service=service,
+        schedule_service=_schedule_service,
         signal_available_fn=signal_client.is_available,
     )
 
@@ -113,7 +131,8 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
-    repo.close()
+    reminder_repo.close()
+    schedule_repo.close()
     logger.info("Klaxxon stopped")
 
 

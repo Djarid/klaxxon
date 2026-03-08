@@ -6,7 +6,9 @@ import pytest
 
 from src.models.reminder import Reminder, ReminderState
 from src.repository.sqlite import SqliteReminderRepository
+from src.repository.schedule_sqlite import SqliteScheduleRepository
 from src.services.reminder_service import ReminderService
+from src.services.schedule_service import ScheduleService
 from src.services.notification.base import (
     IncomingMessage,
     MessageReceiver,
@@ -64,3 +66,21 @@ def mock_sender() -> MockSender:
 @pytest.fixture
 def mock_receiver() -> MockReceiver:
     return MockReceiver()
+
+
+@pytest.fixture
+def schedule_repo() -> SqliteScheduleRepository:
+    """In-memory SQLite schedule repository."""
+    return SqliteScheduleRepository(":memory:")
+
+
+@pytest.fixture
+def schedule_service(
+    schedule_repo: SqliteScheduleRepository, repo: SqliteReminderRepository
+) -> ScheduleService:
+    """Schedule service with in-memory repos."""
+    return ScheduleService(
+        schedule_repo=schedule_repo,
+        reminder_repo=repo,
+        timezone_name="Europe/London",
+    )
