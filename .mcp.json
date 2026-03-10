@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "aetos-memory": {
+      "command": "/home/jasonh/git/klaxxon/.venv/bin/python",
+      "args": ["-m", "aetos.memory.mcp_server"],
+      "env": {
+        "AETOS_ROOT": "./.aetos"
+      }
+    },
+    "aetos-notify": {
+      "command": "/home/jasonh/git/klaxxon/.venv/bin/python",
+      "args": ["-m", "aetos.notify.mcp_server"],
+      "env": {
+        "AETOS_ROOT": "./.aetos"
+      }
+    },
+    "aetos-git": {
+      "command": "/home/jasonh/git/klaxxon/.venv/bin/python",
+      "args": ["-m", "aetos.git.mcp_server"]
+    },
+    "aetos-pm": {
+      "command": "/home/jasonh/git/klaxxon/.venv/bin/python",
+      "args": ["-m", "aetos.pm.mcp_server"],
+      "env": {
+        "AETOS_ROOT": "./.aetos"
+      }
+    },
+    "aetos-codegraph": {
+      "command": "/home/jasonh/git/klaxxon/.venv/bin/python",
+      "args": ["-m", "aetos.codegraph.mcp_server"],
+      "env": {
+        "AETOS_ROOT": "./.aetos"
+      }
+    }
+  }
+}
