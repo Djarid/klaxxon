@@ -25,3 +25,9 @@ dist/
 build/
 .coverage
 .pytest_cache/
+
+# AETOS and OpenCode agent config (local only, not for version control)
+.aetos/
+.opencode/
+opencode.json
+p!zW_YC,
