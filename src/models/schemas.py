@@ -226,3 +226,22 @@ class ScheduleListResponse(BaseModel):
 
     schedules: list[ScheduleResponse]
     count: int
+
+
+class CleanupRequest(BaseModel):
+    """Request body for POST /api/housekeeping/cleanup."""
+
+    retention_days: Optional[int] = Field(default=None, ge=1, le=3650)
+
+
+class CleanupResponse(BaseModel):
+    """Response body for POST /api/housekeeping/cleanup."""
+
+    dry_run: bool
+    retention_days: int
+    cutoff: datetime  # UTC timestamp used as the boundary
+    deleted_reminders: int  # total reminders removed
+    deleted_acknowledged: int  # ACKNOWLEDGED reminders removed
+    deleted_skipped: int  # SKIPPED reminders removed
+    deleted_missed: int  # MISSED reminders removed
+    deleted_orphan_tokens: int  # orphaned ack_tokens removed

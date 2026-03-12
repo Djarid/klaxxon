@@ -104,6 +104,12 @@ class AppConfig:
     list_keywords: list[str] = field(default_factory=lambda: ["list", "meetings"])
     help_keywords: list[str] = field(default_factory=lambda: ["help"])
 
+    # Housekeeping: age-out of terminal reminders
+    retention_days: int = (
+        30  # days to keep terminal reminders (0 = disable auto-cleanup)
+    )
+    cleanup_interval_hours: int = 1  # how often automatic cleanup runs (hours)
+
 
 def load_config(
     config_path: Path = Path("config.yaml"),
@@ -163,6 +169,13 @@ def load_config(
         sched = data.get("scheduler", {})
         cfg.check_interval_sec = sched.get("check_interval_sec", cfg.check_interval_sec)
 
+        # Housekeeping
+        hk = data.get("housekeeping", {})
+        cfg.retention_days = hk.get("retention_days", cfg.retention_days)
+        cfg.cleanup_interval_hours = hk.get(
+            "cleanup_interval_hours", cfg.cleanup_interval_hours
+        )
+
         # Signal commands
         cmds = data.get("commands", {})
         if "acknowledge" in cmds:
@@ -187,5 +200,13 @@ def load_config(
     raw_base_url = os.environ.get("KLAXXON_BASE_URL", "").strip()
     if raw_base_url:
         cfg.base_url = raw_base_url.rstrip("/")
+
+    # Housekeeping: retention_days env var override (0 = disable auto-cleanup)
+    raw_retention = os.environ.get("KLAXXON_RETENTION_DAYS", "").strip()
+    if raw_retention:
+        try:
+            cfg.retention_days = int(raw_retention)
+        except ValueError:
+            pass  # Ignore invalid values; keep whatever was in config.yaml or default
 
     return cfg

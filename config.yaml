@@ -74,6 +74,11 @@ escalation_profiles:
 scheduler:
   check_interval_sec: 60
 
+# Housekeeping: age-out of terminal reminders (ACKNOWLEDGED, SKIPPED, MISSED)
+housekeeping:
+  retention_days: 30        # days to keep terminal reminders (0 = disable auto-cleanup)
+  cleanup_interval_hours: 1 # how often automatic cleanup runs (hours)
+
 # Signal commands (incoming message keywords)
 commands:
   acknowledge: ["ack", "joining"]

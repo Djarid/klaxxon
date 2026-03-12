@@ -6,6 +6,7 @@ DRY: all business logic is in ReminderService, not here.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..models.reminder import ReminderState
 from ..models.schemas import (
     AckRequest,
+    CleanupRequest,
+    CleanupResponse,
     HealthResponse,
     ReminderCreate,
     ReminderListResponse,
@@ -45,18 +48,33 @@ router = APIRouter(prefix="/api", dependencies=[Depends(verify_token)])
 _reminder_service: Optional[ReminderService] = None
 _schedule_service: Optional[ScheduleService] = None
 _signal_available_fn = None
+_housekeeping_service = None
 
 
 def set_dependencies(
     service: ReminderService,
     schedule_service: Optional[ScheduleService] = None,
     signal_available_fn=None,
+    housekeeping_service=None,
 ) -> None:
     """Set the service dependencies. Called from main.py."""
-    global _reminder_service, _schedule_service, _signal_available_fn
+    global \
+        _reminder_service, \
+        _schedule_service, \
+        _signal_available_fn, \
+        _housekeeping_service
     _reminder_service = service
     _schedule_service = schedule_service
     _signal_available_fn = signal_available_fn
+    _housekeeping_service = housekeeping_service
+
+
+def _get_housekeeping_service():
+    if _housekeeping_service is None:
+        raise HTTPException(
+            status_code=503, detail="Housekeeping service not initialised"
+        )
+    return _housekeeping_service
 
 
 def _get_service() -> ReminderService:
@@ -273,3 +291,37 @@ async def delete_schedule(schedule_id: int) -> None:
     svc = _get_schedule_service()
     if not svc.deactivate(schedule_id):
         raise HTTPException(status_code=404, detail="Schedule not found")
+
+
+@router.post("/housekeeping/cleanup", response_model=CleanupResponse)
+async def housekeeping_cleanup(
+    body: CleanupRequest = CleanupRequest(),
+    dry_run: bool = False,
+) -> CleanupResponse:
+    """Trigger an immediate cleanup of terminal-state reminders.
+
+    Deletes ACKNOWLEDGED, SKIPPED, and MISSED reminders older than retention_days,
+    and cleans up orphaned ack_tokens. Supports dry_run mode for preview.
+    """
+    svc = _get_housekeeping_service()
+
+    # Use override from body if provided, otherwise fall back to service default
+    effective_days = (
+        body.retention_days if body.retention_days is not None else svc.retention_days
+    )
+
+    # Compute cutoff for response
+    cutoff = datetime.now(timezone.utc) - timedelta(days=effective_days)
+
+    result = svc.cleanup(retention_days=effective_days, dry_run=dry_run)
+
+    return CleanupResponse(
+        dry_run=dry_run,
+        retention_days=effective_days,
+        cutoff=cutoff,
+        deleted_reminders=result.deleted_reminders,
+        deleted_acknowledged=result.deleted_acknowledged,
+        deleted_skipped=result.deleted_skipped,
+        deleted_missed=result.deleted_missed,
+        deleted_orphan_tokens=result.deleted_orphan_tokens,
+    )
