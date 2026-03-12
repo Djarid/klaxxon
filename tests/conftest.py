@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
 import pytest
 
 from src.models.reminder import Reminder, ReminderState
@@ -84,3 +88,93 @@ def schedule_service(
         reminder_repo=repo,
         timezone_name="Europe/London",
     )
+
+
+# ---------------------------------------------------------------------------
+# Housekeeping fixtures (for age-out-acknowledged feature)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def housekeeping_repo() -> SqliteReminderRepository:
+    """Thread-safe in-memory SQLite repository for housekeeping tests."""
+    r = SqliteReminderRepository(":memory:")
+    if r._conn:
+        r._conn.close()
+    r._conn = sqlite3.connect(":memory:", check_same_thread=False)
+    r._conn.row_factory = sqlite3.Row
+    r._conn.execute("PRAGMA journal_mode=WAL")
+    r._conn.execute("PRAGMA foreign_keys=ON")
+    r._ensure_schema()
+    return r
+
+
+@pytest.fixture
+def housekeeping_service(housekeeping_repo: SqliteReminderRepository):
+    """HousekeepingService wired to an in-memory repository with default 30-day retention.
+
+    Lazily imports HousekeepingService so that collection succeeds even before
+    the implementation file exists.
+    """
+    try:
+        from src.services.housekeeping_service import HousekeepingService
+    except ImportError:
+        pytest.skip("src.services.housekeeping_service not yet implemented")
+    return HousekeepingService(repository=housekeeping_repo, retention_days=30)
+
+
+def make_backdated_reminder(
+    repo: SqliteReminderRepository,
+    *,
+    state: ReminderState,
+    days_ago: float,
+    title: str = "Backdated Reminder",
+) -> Reminder:
+    """Helper: create a reminder in the given terminal state with timestamps backdated.
+
+    Useful for setting up age-out test scenarios in a single call.
+
+    Args:
+        repo:      Repository to insert the reminder into.
+        state:     Target terminal state (ACKNOWLEDGED, SKIPPED, or MISSED).
+        days_ago:  How many days ago the terminal timestamp should be set.
+        title:     Optional title for the reminder.
+
+    Returns:
+        The created Reminder with its id populated.
+    """
+    starts_at = datetime.now(timezone.utc) + timedelta(hours=2)
+    reminder = repo.create(Reminder(title=title, starts_at=starts_at))
+    assert reminder.id is not None
+
+    past = datetime.now(timezone.utc) - timedelta(days=days_ago)
+
+    if state == ReminderState.ACKNOWLEDGED:
+        repo.update_state(
+            reminder.id, ReminderState.ACKNOWLEDGED, ack_keyword="ack", ack_at=past
+        )
+    elif state == ReminderState.SKIPPED:
+        repo.update_state(reminder.id, ReminderState.SKIPPED)
+    elif state == ReminderState.MISSED:
+        repo.update_state(reminder.id, ReminderState.REMINDING)
+        repo.update_state(reminder.id, ReminderState.MISSED)
+    else:
+        raise ValueError(f"make_backdated_reminder: unsupported state {state}")
+
+    # Backdate updated_at (and ack_at for acknowledged) directly in SQLite
+    conn = repo._get_conn()
+    conn.execute(
+        "UPDATE reminders SET updated_at = ? WHERE id = ?",
+        (past.isoformat(), reminder.id),
+    )
+    if state == ReminderState.ACKNOWLEDGED:
+        conn.execute(
+            "UPDATE reminders SET ack_at = ? WHERE id = ?",
+            (past.isoformat(), reminder.id),
+        )
+    conn.commit()
+
+    # Re-fetch to get the updated timestamps
+    refreshed = repo.get(reminder.id)
+    assert refreshed is not None
+    return refreshed
