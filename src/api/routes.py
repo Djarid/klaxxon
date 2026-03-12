@@ -21,6 +21,7 @@ from ..models.schemas import (
     ReminderListResponse,
     ReminderResponse,
     ReminderUpdate,
+    ResendResponse,
     ScheduleCreate,
     ScheduleListResponse,
     ScheduleResponse,
@@ -32,6 +33,9 @@ from ..services.reminder_service import (
     ReminderNotFoundError,
     ReminderService,
     PastReminderError,
+    ResendCooldownError,
+    ResendDeliveryError,
+    ResendNotEligibleError,
 )
 from ..services.schedule_service import (
     ScheduleNotFoundError,
@@ -49,6 +53,7 @@ _reminder_service: Optional[ReminderService] = None
 _schedule_service: Optional[ScheduleService] = None
 _signal_available_fn = None
 _housekeeping_service = None
+_reminder_engine = None
 
 
 def set_dependencies(
@@ -56,17 +61,20 @@ def set_dependencies(
     schedule_service: Optional[ScheduleService] = None,
     signal_available_fn=None,
     housekeeping_service=None,
+    reminder_engine=None,
 ) -> None:
     """Set the service dependencies. Called from main.py."""
     global \
         _reminder_service, \
         _schedule_service, \
         _signal_available_fn, \
-        _housekeeping_service
+        _housekeeping_service, \
+        _reminder_engine
     _reminder_service = service
     _schedule_service = schedule_service
     _signal_available_fn = signal_available_fn
     _housekeeping_service = housekeeping_service
+    _reminder_engine = reminder_engine
 
 
 def _get_housekeeping_service():
@@ -87,6 +95,12 @@ def _get_schedule_service() -> ScheduleService:
     if _schedule_service is None:
         raise HTTPException(status_code=503, detail="Schedule service not initialised")
     return _schedule_service
+
+
+def _get_engine():
+    if _reminder_engine is None:
+        raise HTTPException(status_code=503, detail="Reminder engine not initialised")
+    return _reminder_engine
 
 
 @router.post("/reminders", response_model=ReminderResponse, status_code=201)
@@ -191,6 +205,45 @@ async def delete_reminder(reminder_id: int) -> None:
     svc = _get_service()
     if not svc.delete(reminder_id):
         raise HTTPException(status_code=404, detail="Reminder not found")
+
+
+@router.post("/reminders/{reminder_id}/resend", response_model=ResendResponse)
+async def resend_reminder(reminder_id: int) -> ResendResponse:
+    """Resend a notification for an existing reminder.
+
+    Generates a fresh ack token and replays the notification to the reminder
+    owner. Subject to a 60-second cooldown. Does not change reminder state.
+    """
+    engine = _get_engine()
+    svc = _get_service()
+
+    try:
+        sent, ack_url = await engine.resend_notification(reminder_id)
+    except ReminderNotFoundError:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    except ResendNotEligibleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ResendCooldownError as exc:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Resend cooldown active. Try again later."},
+            headers={"Retry-After": str(exc.retry_after)},
+        )
+    except ResendDeliveryError:
+        raise HTTPException(status_code=502, detail="Notification delivery failed")
+
+    # Re-fetch reminder to get current state (state must not change)
+    reminder = svc.get(reminder_id)
+
+    return ResendResponse(
+        reminder_id=reminder_id,
+        state=reminder.state,
+        sent=sent,
+        ack_url=ack_url,
+        message=f"Resend delivered for '{reminder.title}'",
+    )
 
 
 @router.get("/health", response_model=HealthResponse)

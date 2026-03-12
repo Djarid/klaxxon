@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING, Optional
 from ..config import EscalationProfile
 from ..models.reminder import Reminder, ReminderState
 from ..repository.sqlite import SqliteReminderRepository
-from .reminder_service import ReminderService
+from .reminder_service import (
+    ReminderNotFoundError,
+    ResendCooldownError,
+    ResendDeliveryError,
+    ResendNotEligibleError,
+    ReminderService,
+    RESEND_COOLDOWN_SEC,
+)
 from .notification.base import MessageSender
 
 if TYPE_CHECKING:
@@ -338,3 +345,83 @@ class ReminderEngine:
             mins_until=mins_until,
             mins_ago=mins_ago,
         )
+
+    async def resend_notification(self, reminder_id: int) -> tuple[bool, Optional[str]]:
+        """Resend a notification for an existing reminder.
+
+        Returns (sent: bool, ack_url: Optional[str]).
+
+        Raises:
+            ReminderNotFoundError: reminder does not exist.
+            ResendNotEligibleError: reminder in PENDING or SKIPPED state.
+            ResendCooldownError: resend attempted too soon (within 60s of last resend).
+            ResendDeliveryError: MessageSender.send_message returned False.
+        """
+        # 1. Look up the reminder — raise ReminderNotFoundError if not found
+        reminder = self._repo.get(reminder_id)
+        if reminder is None:
+            raise ReminderNotFoundError(f"Reminder {reminder_id} not found")
+
+        # 2. Validate state eligibility
+        _ELIGIBLE = {
+            ReminderState.REMINDING,
+            ReminderState.ACKNOWLEDGED,
+            ReminderState.MISSED,
+        }
+        if reminder.state not in _ELIGIBLE:
+            raise ResendNotEligibleError(reminder_id, reminder.state.value)
+
+        # 3. Check cooldown: query reminder_log for channel='resend' entries only
+        last_resend = self._repo.get_last_resend_time(reminder_id)
+        if last_resend is not None:
+            now_utc = datetime.now(timezone.utc)
+            # Make last_resend timezone-aware if stored naively
+            if last_resend.tzinfo is None:
+                last_resend = last_resend.replace(tzinfo=timezone.utc)
+            elapsed = (now_utc - last_resend).total_seconds()
+            if elapsed < RESEND_COOLDOWN_SEC:
+                retry_after = int(RESEND_COOLDOWN_SEC - elapsed)
+                raise ResendCooldownError(reminder_id, retry_after)
+
+        # 4. Build the [RESEND] message
+        assert reminder.starts_at is not None
+        time_str = reminder.starts_at.strftime("%H:%M")
+        lines = [f"[RESEND] {reminder.title}", f"Scheduled: {time_str}"]
+        if reminder.description:
+            lines.append(reminder.description)
+        if reminder.link:
+            lines.append(reminder.link)
+
+        # 5. Prepare ack token (no storage yet)
+        token_meta = None  # (ack_url, token_hash, reminder_id, expires_at)
+        ack_url: Optional[str] = None
+
+        if self._ack_token_service is not None:
+            prepared = self._ack_token_service.prepare_token(reminder_id)
+            if prepared is not None:
+                url, token_hash, expires_at = prepared
+                ack_url = url
+                lines.append(f"Ack: {url}")
+                token_meta = (token_hash, reminder_id, expires_at)
+
+        message = "\n".join(lines)
+
+        # 6. Send to owner only (not escalate_to)
+        sent = await self._sender.send_message(self._recipient, message)
+
+        # 7. On failure: raise ResendDeliveryError (no token committed, no log)
+        if not sent:
+            raise ResendDeliveryError(reminder_id)
+
+        # 8. Commit token and write to reminder_log on success
+        if token_meta is not None and self._ack_token_service is not None:
+            t_hash, r_id, t_expires = token_meta
+            self._ack_token_service.commit_token(
+                token_hash=t_hash,
+                reminder_id=r_id,
+                expires_at=t_expires,
+            )
+
+        self._repo.log_reminder(reminder_id, message, channel="resend")
+
+        return True, ack_url

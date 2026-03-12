@@ -228,6 +228,16 @@ class ScheduleListResponse(BaseModel):
     count: int
 
 
+class ResendResponse(BaseModel):
+    """Response body for POST /api/reminders/{id}/resend."""
+
+    reminder_id: int
+    state: ReminderState
+    sent: bool
+    ack_url: Optional[str] = None
+    message: str
+
+
 class CleanupRequest(BaseModel):
     """Request body for POST /api/housekeeping/cleanup."""
 

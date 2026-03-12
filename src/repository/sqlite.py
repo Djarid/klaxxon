@@ -285,6 +285,24 @@ class SqliteReminderRepository(ReminderRepository, AckTokenRepository):
             return None
         return _parse_dt(row["sent_at"])
 
+    def get_last_resend_time(self, reminder_id: int) -> Optional[datetime]:
+        """Get the timestamp of the most recent 'resend' log entry for a reminder.
+
+        Used by the cooldown check in ReminderEngine.resend_notification().
+        Only queries channel='resend' entries — engine-initiated 'signal' entries
+        do NOT trigger the cooldown (REQ-9).
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            """SELECT sent_at FROM reminder_log
+            WHERE reminder_id = ? AND channel = 'resend'
+            ORDER BY sent_at DESC LIMIT 1""",
+            (reminder_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _parse_dt(row["sent_at"])
+
     def update_fields(self, reminder_id: int, fields: dict) -> Optional[Reminder]:
         """Update specific fields on a reminder. Returns updated reminder or None if not found."""
         if not fields:

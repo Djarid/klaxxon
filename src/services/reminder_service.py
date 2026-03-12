@@ -44,6 +44,43 @@ class InvalidStateError(Exception):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Resend-specific exceptions (REQ-9, REQ-12, E-7)
+# ---------------------------------------------------------------------------
+
+RESEND_ELIGIBLE_STATES = None  # imported lazily to avoid circular; set below
+RESEND_COOLDOWN_SEC = 60
+
+
+class ResendNotEligibleError(Exception):
+    """Raised when a reminder's state does not allow resend (PENDING or SKIPPED)."""
+
+    def __init__(self, reminder_id: int, state: str) -> None:
+        self.reminder_id = reminder_id
+        self.state = state
+        super().__init__(
+            f"Cannot resend for reminder in '{state}' state. "
+            "Eligible states: reminding, acknowledged, missed"
+        )
+
+
+class ResendCooldownError(Exception):
+    """Raised when a resend is attempted before the 60-second cooldown expires."""
+
+    def __init__(self, reminder_id: int, retry_after: int) -> None:
+        self.reminder_id = reminder_id
+        self.retry_after = retry_after
+        super().__init__(f"Resend cooldown active. Retry after {retry_after}s.")
+
+
+class ResendDeliveryError(Exception):
+    """Raised when MessageSender.send_message returns False during resend."""
+
+    def __init__(self, reminder_id: int) -> None:
+        self.reminder_id = reminder_id
+        super().__init__(f"Notification delivery failed for reminder {reminder_id}")
+
+
 class ReminderService:
     """Business logic for reminder operations.
 
