@@ -36,7 +36,7 @@ repos:
               *.jsonl) echo "BLOCKED: data file: $f"; status=1;;
               *.pyc) echo "BLOCKED: bytecode: $f"; status=1;;
               *.egg-info/*) echo "BLOCKED: build artifact: $f"; status=1;;
-              .env|.env.*) echo "BLOCKED: env file: $f"; status=1;;
+              .env|.env.local|.env.*.local) echo "BLOCKED: env file: $f"; status=1;;
               venv/*|.venv/*|env/*) echo "BLOCKED: virtualenv: $f"; status=1;;
               node_modules/*) echo "BLOCKED: node_modules: $f"; status=1;;
               __pycache__/*) echo "BLOCKED: pycache: $f"; status=1;;
