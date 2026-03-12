@@ -29,5 +29,6 @@ build/
 # AETOS and OpenCode agent config (local only, not for version control)
 .aetos/
 .opencode/
+.Claude/
 opencode.json
 p!zW_YC,
