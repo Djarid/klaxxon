@@ -15,10 +15,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .api import routes
+from .api.ack_routes import router as ack_router
+from .api.ack_routes import set_dependencies as ack_set_dependencies
 from .api.auth import register_token
 from .config import AppConfig, load_config
 from .repository.sqlite import SqliteReminderRepository
 from .repository.schedule_sqlite import SqliteScheduleRepository
+from .services.ack_token_service import AckTokenService
 from .services.reminder_service import ReminderService
 from .services.schedule_service import ScheduleService
 from .services.notification.signal_client import SignalClient
@@ -87,12 +90,23 @@ async def lifespan(app: FastAPI):
         timezone_name=_config.timezone,
     )
 
+    # Ack token service — requires the shared reminder_repo (same DB connection)
+    ack_token_service = AckTokenService(
+        repository=reminder_repo,
+        base_url=_config.base_url,
+    )
+    if _config.base_url:
+        logger.info("Ack token URL base: %s", _config.base_url)
+    else:
+        logger.info("KLAXXON_BASE_URL not set — ack URLs disabled")
+
     _reminder_engine = ReminderEngine(
         service=service,
         repository=reminder_repo,
         sender=signal_client,
         recipient=_config.signal_recipient,
         escalation_profiles=_config.escalation_profiles,
+        ack_token_service=ack_token_service,
     )
 
     _signal_handler = SignalHandler(
@@ -117,6 +131,12 @@ async def lifespan(app: FastAPI):
         service=service,
         schedule_service=_schedule_service,
         signal_available_fn=signal_client.is_available,
+    )
+
+    # Set ack route dependencies (public router, no auth)
+    ack_set_dependencies(
+        service=service,
+        ack_token_service=ack_token_service,
     )
 
     # Start background scheduler
@@ -144,6 +164,7 @@ app = FastAPI(
 )
 
 app.include_router(routes.router)
+app.include_router(ack_router)  # Public ack endpoint — no auth required (REQ-5, REQ-14)
 
 # Serve SPA static files (web/ directory alongside src/)
 _web_dir = Path(__file__).resolve().parent.parent / "web"

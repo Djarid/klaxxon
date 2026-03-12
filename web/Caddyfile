@@ -25,6 +25,16 @@
         }
     }
 
+    # Proxy one-time ack token links to the API LXC (no auth required, REQ-14)
+    handle /ack/* {
+        reverse_proxy https://192.168.1.11:8443 {
+            transport http {
+                tls_client_auth /etc/klaxxon/certs/web.crt /etc/klaxxon/certs/web.key
+                tls_trusted_ca_certs /etc/klaxxon/certs/ca.crt
+            }
+        }
+    }
+
     # SPA fallback: serve index.html for all non-file routes
     try_files {path} /index.html
 

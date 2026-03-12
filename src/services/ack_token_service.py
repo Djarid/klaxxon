@@ -75,13 +75,35 @@ class AckTokenService:
             self._base_url = None
 
     def create_token(self, reminder_id: int) -> Optional[str]:
-        """Generate a one-time ack token for a reminder.
+        """Generate a one-time ack token for a reminder and persist it immediately.
 
         Returns the full ack URL (``{base_url}/ack/{raw_token}``) when
         base_url is configured, or None when it is not (REQ-4, E-1).
 
         The raw token is returned to the caller for URL construction but is
         NOT stored — only the SHA-256 hash is persisted (REQ-11).
+
+        .. note::
+            This method stores the token immediately.  If you need to defer
+            storage until after a successful send, use :meth:`prepare_token`
+            followed by :meth:`commit_token` instead.
+        """
+        if not self._base_url:
+            return None  # REQ-4: graceful degradation
+
+        url, token_hash, expires_at = self.prepare_token(reminder_id)
+        self.commit_token(
+            token_hash=token_hash, reminder_id=reminder_id, expires_at=expires_at
+        )
+        return url
+
+    def prepare_token(self, reminder_id: int) -> Optional[tuple[str, str, datetime]]:
+        """Generate token data WITHOUT persisting it.
+
+        Returns ``(url, token_hash, expires_at)`` when base_url is configured,
+        or ``None`` when it is not (REQ-4, E-1).
+
+        Use :meth:`commit_token` to persist after a successful send (E-10).
         """
         if not self._base_url:
             return None  # REQ-4: graceful degradation
@@ -89,16 +111,26 @@ class AckTokenService:
         # REQ-10: 256 bits of entropy (secrets.token_urlsafe(32) → 43 chars)
         raw_token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-
         expires_at = datetime.now(timezone.utc) + timedelta(hours=_TOKEN_EXPIRY_HOURS)
+        url = f"{self._base_url}/ack/{raw_token}"
+        return url, token_hash, expires_at
 
+    def commit_token(
+        self,
+        token_hash: str,
+        reminder_id: int,
+        expires_at: datetime,
+    ) -> None:
+        """Persist a previously prepared token hash (REQ-12 / E-10).
+
+        Called only after the notification send succeeds so that the token is
+        not stored for failed sends.
+        """
         self._repo.store_token(
             token_hash=token_hash,
             reminder_id=reminder_id,
             expires_at=expires_at,
         )
-
-        return f"{self._base_url}/ack/{raw_token}"
 
     def redeem_token(self, raw_token: str) -> int:
         """Validate and consume a token.  Returns the reminder_id on success.
