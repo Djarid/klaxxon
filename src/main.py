@@ -161,6 +161,7 @@ async def lifespan(app: FastAPI):
         schedule_service=_schedule_service,
         signal_available_fn=signal_client.is_available,
         housekeeping_service=_housekeeping,
+        reminder_engine=_reminder_engine,
     )
 
     # Set ack route dependencies (public router, no auth)

@@ -85,7 +85,7 @@ def _import_resend_response_schema():
 def _verify_resend_route_registered():
     """Assert that POST /reminders/{reminder_id}/resend is on the router."""
     path_ops = {getattr(route, "path", None): route for route in routes.router.routes}
-    if "/reminders/{reminder_id}/resend" not in path_ops:
+    if "/api/reminders/{reminder_id}/resend" not in path_ops:
         pytest.fail(
             "POST /reminders/{reminder_id}/resend not registered on routes.router. "
             "Expected in src/api/routes.py."
