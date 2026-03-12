@@ -1,0 +1,94 @@
+# AETOS git hooks — enforces guardrails at VCS level for all committers.
+# Install: pre-commit install --install-hooks
+# Run manually: pre-commit run --all-files
+# Skip (emergency only): git commit --no-verify
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+fail_fast: false
+
+repos:
+  # Branch protection: block commits to main/master
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']
+      - id: check-added-large-files
+        args: ['--maxkb', '500']
+
+  # Secrets scanning
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  # Data/artifact file blocking (mirrors guards.py DATA_FILE_PATTERNS)
+  - repo: local
+    hooks:
+      - id: no-data-files
+        name: Block data/artifact files
+        entry: >-
+          bash -c '
+          status=0;
+          for f in "$@"; do
+            case "$f" in
+              *.db|*.sqlite|*.sqlite3) echo "BLOCKED: data file: $f"; status=1;;
+              *.jsonl) echo "BLOCKED: data file: $f"; status=1;;
+              *.pyc) echo "BLOCKED: bytecode: $f"; status=1;;
+              *.egg-info/*) echo "BLOCKED: build artifact: $f"; status=1;;
+              .env|.env.local|.env.*.local) echo "BLOCKED: env file: $f"; status=1;;
+              venv/*|.venv/*|env/*) echo "BLOCKED: virtualenv: $f"; status=1;;
+              node_modules/*) echo "BLOCKED: node_modules: $f"; status=1;;
+              __pycache__/*) echo "BLOCKED: pycache: $f"; status=1;;
+            esac;
+          done;
+          exit $status'
+        language: system
+        types: [file]
+
+  # Conventional commits format
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, refactor, docs, test, chore, release, ci, perf]
+
+  # Branch naming + tests before push
+  - repo: local
+    hooks:
+      - id: branch-naming
+        name: Enforce branch naming convention
+        entry: >-
+          bash -c '
+          BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null);
+          case "$BRANCH" in
+            main|master) exit 0;;
+            feature/*|fix/*|release/*) exit 0;;
+            *)
+              echo "ERROR: Branch \"$BRANCH\" does not follow naming convention.";
+              echo "Expected: feature/<name>, fix/<name>, or release/<name>";
+              exit 1;;
+          esac'
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: pytest-check
+        name: Run tests before push
+        entry: >-
+          bash -c '
+          if [ -f venv/bin/pytest ]; then
+            echo "Running tests before push...";
+            venv/bin/pytest tests/ -x -q;
+          elif command -v pytest >/dev/null 2>&1; then
+            echo "Running tests before push...";
+            pytest tests/ -x -q;
+          else
+            echo "WARNING: pytest not found, skipping pre-push tests";
+          fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

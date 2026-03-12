@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
+from ..models.ack_token import AckToken
 from ..models.reminder import Reminder, ReminderState
 from ..models.schedule import Schedule
 
@@ -97,4 +98,43 @@ class ScheduleRepository(ABC):
     @abstractmethod
     def deactivate(self, schedule_id: int) -> bool:
         """Deactivate a schedule (soft delete). Returns True if successful."""
+        ...
+
+
+class AckTokenRepository(ABC):
+    """Abstract interface for one-time ack token persistence.
+
+    Raw tokens are NEVER stored — only SHA-256 hashes.
+    """
+
+    @abstractmethod
+    def store_token(
+        self,
+        token_hash: str,
+        reminder_id: int,
+        expires_at: datetime,
+    ) -> None:
+        """Persist a new ack token.
+
+        Stores only the hash (not the raw token), the associated reminder_id,
+        and expiry timestamp.  created_at is set to now by the implementation.
+        """
+        ...
+
+    @abstractmethod
+    def get_by_hash(self, token_hash: str) -> Optional[AckToken]:
+        """Look up an ack token by its SHA-256 hash.  Returns None if not found."""
+        ...
+
+    @abstractmethod
+    def mark_used(self, token_hash: str) -> bool:
+        """Atomically mark a token as used.
+
+        Uses a single UPDATE … WHERE used = 0 so that concurrent requests
+        cannot both succeed.
+
+        Returns True if the token was successfully marked used (i.e. it existed
+        and was not already used).  Returns False otherwise (already used or not
+        found), which the caller should treat as a replay-prevention failure.
+        """
         ...

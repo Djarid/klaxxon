@@ -93,6 +93,11 @@ class AppConfig:
     # Scheduler
     check_interval_sec: int = 60
 
+    # Public base URL for one-time ack token links (REQ-3, E-11)
+    # e.g. "https://klaxxon.example.com" — set via KLAXXON_BASE_URL env var.
+    # Trailing slash is stripped during load_config.
+    base_url: Optional[str] = None
+
     # Signal commands
     ack_keywords: list[str] = field(default_factory=lambda: ["ack", "joining"])
     skip_keywords: list[str] = field(default_factory=lambda: ["skip"])
@@ -177,5 +182,10 @@ def load_config(
     cfg.db_path = os.environ.get("DB_PATH", cfg.db_path)
     cfg.tls_cert = os.environ.get("TLS_CERT_PATH", cfg.tls_cert)
     cfg.tls_key = os.environ.get("TLS_KEY_PATH", cfg.tls_key)
+
+    # Public base URL for ack token links (E-11: strip trailing slash)
+    raw_base_url = os.environ.get("KLAXXON_BASE_URL", "").strip()
+    if raw_base_url:
+        cfg.base_url = raw_base_url.rstrip("/")
 
     return cfg

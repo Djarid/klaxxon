@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from ..config import EscalationProfile
 from ..models.reminder import Reminder, ReminderState
 from ..repository.sqlite import SqliteReminderRepository
 from .reminder_service import ReminderService
 from .notification.base import MessageSender
+
+if TYPE_CHECKING:
+    from .ack_token_service import AckTokenService
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +33,14 @@ class ReminderEngine:
         sender: MessageSender,
         recipient: str,
         escalation_profiles: dict[str, EscalationProfile],
+        ack_token_service: Optional["AckTokenService"] = None,
     ) -> None:
         self._service = service
         self._repo = repository
         self._sender = sender
         self._recipient = recipient
         self._profiles = escalation_profiles
+        self._ack_token_service = ack_token_service
 
     async def tick(self) -> None:
         """Run one scheduler cycle. Called periodically by the main loop."""
@@ -257,17 +262,41 @@ class ReminderEngine:
     ) -> bool:
         """Send message to resolved recipients based on target.
 
+        If ``ack_token_service`` is configured, a one-time ack URL is
+        generated and appended to the message *before* sending.  The token
+        hash is only persisted if the send succeeds (E-10, REQ-12).
+
         Returns True if at least one message was sent successfully.
         """
         recipients = self._resolve_target(reminder, target)
         if not recipients:
             return False
 
+        # Prepare ack token (no storage yet) — REQ-3, REQ-12, E-10
+        token_meta = None  # (token_hash, reminder_id, expires_at)
+        outbound_message = message
+        if self._ack_token_service is not None and reminder.id is not None:
+            prepared = self._ack_token_service.prepare_token(reminder.id)
+            if prepared is not None:
+                ack_url, token_hash, expires_at = prepared
+                outbound_message = message + f"\nAck: {ack_url}"
+                token_meta = (token_hash, reminder.id, expires_at)
+
         sent_any = False
         for recipient in recipients:
-            sent = await self._sender.send_message(recipient, message)
+            sent = await self._sender.send_message(recipient, outbound_message)
             if sent:
                 sent_any = True
+
+        # Persist token only after at least one successful send (E-10)
+        if sent_any and token_meta is not None and self._ack_token_service is not None:
+            token_hash, r_id, expires_at = token_meta
+            self._ack_token_service.commit_token(
+                token_hash=token_hash,
+                reminder_id=r_id,
+                expires_at=expires_at,
+            )
+
         return sent_any
 
     def _resolve_target(self, reminder: Reminder, target: str) -> list[str]:
