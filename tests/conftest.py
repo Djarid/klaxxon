@@ -8,9 +8,11 @@ from typing import Optional
 
 import pytest
 
+from src.config import EscalationProfile, EscalationStage
 from src.models.reminder import Reminder, ReminderState
 from src.repository.sqlite import SqliteReminderRepository
 from src.repository.schedule_sqlite import SqliteScheduleRepository
+from src.services.reminder_engine import ReminderEngine
 from src.services.reminder_service import ReminderService
 from src.services.schedule_service import ScheduleService
 from src.services.notification.base import (
@@ -121,6 +123,106 @@ def housekeeping_service(housekeeping_repo: SqliteReminderRepository):
     except ImportError:
         pytest.skip("src.services.housekeeping_service not yet implemented")
     return HousekeepingService(repository=housekeeping_repo, retention_days=30)
+
+
+# ---------------------------------------------------------------------------
+# Resend fixtures (for resend-notification feature)
+# ---------------------------------------------------------------------------
+
+#: Simple 1-stage escalation profile reused by resend fixtures.
+_RESEND_TEST_PROFILE: dict[str, EscalationProfile] = {
+    "meeting": EscalationProfile(
+        stages=[
+            EscalationStage(
+                offset_hours=-1.0,
+                interval_min=None,
+                target="self",
+                message="Reminder: {title} at {time}",
+            )
+        ],
+        post_start_interval_min=2,
+        post_start_target="self",
+        post_start_message="Started: {title}",
+        overflow=None,
+        timeout_after_min=30,
+    )
+}
+
+
+@pytest.fixture
+def resend_engine_fixture(
+    service: ReminderService,
+    repo: SqliteReminderRepository,
+    mock_sender: MockSender,
+):
+    """ReminderEngine with AckTokenService (base_url configured) for resend tests.
+
+    Lazily imports AckTokenService so collection succeeds before implementation
+    exists.  If AckTokenService is not yet implemented, engine is wired with
+    ack_token_service=None and the fixture proceeds (a separate test will
+    detect the missing import).
+    """
+    try:
+        from src.services.ack_token_service import AckTokenService
+
+        ack_service = AckTokenService(
+            repository=repo,
+            base_url="https://klaxxon.example.com",
+        )
+    except ImportError:
+        ack_service = None
+
+    return ReminderEngine(
+        service=service,
+        repository=repo,
+        sender=mock_sender,
+        recipient="+441234567890",
+        escalation_profiles=_RESEND_TEST_PROFILE,
+        ack_token_service=ack_service,
+    )
+
+
+@pytest.fixture
+def resend_engine_no_base_url_fixture(
+    service: ReminderService,
+    repo: SqliteReminderRepository,
+    mock_sender: MockSender,
+):
+    """ReminderEngine with no AckTokenService (KLAXXON_BASE_URL not set)."""
+    return ReminderEngine(
+        service=service,
+        repository=repo,
+        sender=mock_sender,
+        recipient="+441234567890",
+        escalation_profiles=_RESEND_TEST_PROFILE,
+        ack_token_service=None,
+    )
+
+
+@pytest.fixture
+def resend_engine_failing_fixture(
+    service: ReminderService,
+    repo: SqliteReminderRepository,
+):
+    """ReminderEngine whose MessageSender always returns False."""
+    try:
+        from src.services.ack_token_service import AckTokenService
+
+        ack_service = AckTokenService(
+            repository=repo,
+            base_url="https://klaxxon.example.com",
+        )
+    except ImportError:
+        ack_service = None
+
+    return ReminderEngine(
+        service=service,
+        repository=repo,
+        sender=FailingSender(),
+        recipient="+441234567890",
+        escalation_profiles=_RESEND_TEST_PROFILE,
+        ack_token_service=ack_service,
+    )
 
 
 def make_backdated_reminder(
