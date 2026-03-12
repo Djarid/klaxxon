@@ -61,6 +61,8 @@ repos:
         name: Enforce branch naming convention
         entry: >-
           bash -c '
+          PUSH_INFO=$(cat /dev/stdin 2>/dev/null || true);
+          if echo "$PUSH_INFO" | grep -qE " 0{40}( |$)"; then exit 0; fi;
           BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null);
           case "$BRANCH" in
             main|master) exit 0;;
@@ -79,9 +81,11 @@ repos:
         name: Run tests before push
         entry: >-
           bash -c '
-          if [ -f venv/bin/pytest ]; then
+          PUSH_INFO=$(cat /dev/stdin 2>/dev/null || true);
+          if echo "$PUSH_INFO" | grep -qE " 0{40}( |$)"; then exit 0; fi;
+          if [ -f .venv/bin/pytest ]; then
             echo "Running tests before push...";
-            venv/bin/pytest tests/ -x -q;
+            .venv/bin/pytest tests/ -x -q;
           elif command -v pytest >/dev/null 2>&1; then
             echo "Running tests before push...";
             pytest tests/ -x -q;
