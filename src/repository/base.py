@@ -71,6 +71,24 @@ class ReminderRepository(ABC):
         """Update specific fields on a reminder. Returns updated reminder or None if not found."""
         ...
 
+    @abstractmethod
+    def delete_terminal_reminders(
+        self,
+        cutoff: datetime,
+        states: list[ReminderState],
+        dry_run: bool = False,
+    ) -> dict[str, int]:
+        """Delete (or count, if dry_run) reminders in given terminal states
+        whose terminal timestamp is before cutoff.
+
+        For ACKNOWLEDGED state, uses ack_at (with fallback to updated_at if NULL).
+        For SKIPPED/MISSED states, uses updated_at.
+
+        Returns dict mapping state name -> count of affected rows.
+        e.g. {"acknowledged": 5, "skipped": 2, "missed": 1}
+        """
+        ...
+
 
 class ScheduleRepository(ABC):
     """Abstract interface for schedule persistence."""
@@ -136,5 +154,14 @@ class AckTokenRepository(ABC):
         Returns True if the token was successfully marked used (i.e. it existed
         and was not already used).  Returns False otherwise (already used or not
         found), which the caller should treat as a replay-prevention failure.
+        """
+        ...
+
+    @abstractmethod
+    def delete_orphan_tokens(self, dry_run: bool = False) -> int:
+        """Delete (or count, if dry_run) ack_tokens that reference
+        non-existent reminders or are expired AND used.
+
+        Returns count of affected rows.
         """
         ...

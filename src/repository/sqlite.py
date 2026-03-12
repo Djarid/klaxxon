@@ -404,6 +404,118 @@ class SqliteReminderRepository(ReminderRepository, AckTokenRepository):
         conn.commit()
         return cursor.rowcount == 1
 
+    # ------------------------------------------------------------------
+    # Housekeeping: delete terminal reminders + orphan tokens
+    # ------------------------------------------------------------------
+
+    def delete_terminal_reminders(
+        self,
+        cutoff: datetime,
+        states: list,
+        dry_run: bool = False,
+    ) -> dict[str, int]:
+        """Delete (or count) terminal-state reminders older than cutoff.
+
+        For ACKNOWLEDGED: uses ack_at (COALESCE to updated_at if NULL).
+        For SKIPPED/MISSED: uses updated_at.
+
+        Returns dict mapping state name -> count of affected rows.
+        """
+        from ..models.reminder import ReminderState
+
+        cutoff_iso = cutoff.isoformat()
+        conn = self._get_conn()
+        result: dict[str, int] = {}
+
+        for state in states:
+            state_val = state.value if hasattr(state, "value") else state
+
+            if state_val == ReminderState.ACKNOWLEDGED.value:
+                # ACKNOWLEDGED: use ack_at, fall back to updated_at if NULL
+                if dry_run:
+                    row = conn.execute(
+                        """SELECT COUNT(*) AS cnt FROM reminders
+                           WHERE state = ?
+                           AND COALESCE(ack_at, updated_at) < ?""",
+                        (state_val, cutoff_iso),
+                    ).fetchone()
+                    result[state_val] = row["cnt"] if row else 0
+                else:
+                    cursor = conn.execute(
+                        """DELETE FROM reminders
+                           WHERE state = ?
+                           AND COALESCE(ack_at, updated_at) < ?""",
+                        (state_val, cutoff_iso),
+                    )
+                    result[state_val] = cursor.rowcount
+            else:
+                # SKIPPED / MISSED: use updated_at
+                if dry_run:
+                    row = conn.execute(
+                        """SELECT COUNT(*) AS cnt FROM reminders
+                           WHERE state = ?
+                           AND updated_at < ?""",
+                        (state_val, cutoff_iso),
+                    ).fetchone()
+                    result[state_val] = row["cnt"] if row else 0
+                else:
+                    cursor = conn.execute(
+                        """DELETE FROM reminders
+                           WHERE state = ?
+                           AND updated_at < ?""",
+                        (state_val, cutoff_iso),
+                    )
+                    result[state_val] = cursor.rowcount
+
+        if not dry_run:
+            conn.commit()
+
+        return result
+
+    def delete_orphan_tokens(self, dry_run: bool = False) -> int:
+        """Delete (or count) ack_tokens that are orphaned or used+expired.
+
+        Orphan: reminder_id NOT IN (SELECT id FROM reminders).
+        Used+expired: used = 1 AND expires_at < now.
+
+        Returns count of affected rows.
+        """
+        now_iso = _now_utc()
+        conn = self._get_conn()
+
+        if dry_run:
+            row_orphan = conn.execute(
+                """SELECT COUNT(*) AS cnt FROM ack_tokens
+                   WHERE reminder_id NOT IN (SELECT id FROM reminders)""",
+            ).fetchone()
+            orphan_count = row_orphan["cnt"] if row_orphan else 0
+
+            row_used_exp = conn.execute(
+                """SELECT COUNT(*) AS cnt FROM ack_tokens
+                   WHERE used = 1 AND expires_at < ?
+                   AND reminder_id IN (SELECT id FROM reminders)""",
+                (now_iso,),
+            ).fetchone()
+            used_exp_count = row_used_exp["cnt"] if row_used_exp else 0
+
+            return orphan_count + used_exp_count
+        else:
+            cursor_orphan = conn.execute(
+                """DELETE FROM ack_tokens
+                   WHERE reminder_id NOT IN (SELECT id FROM reminders)""",
+            )
+            orphan_count = cursor_orphan.rowcount
+
+            cursor_used_exp = conn.execute(
+                """DELETE FROM ack_tokens
+                   WHERE used = 1 AND expires_at < ?""",
+                (now_iso,),
+            )
+            used_exp_count = cursor_used_exp.rowcount
+
+            conn.commit()
+            return orphan_count + used_exp_count
+
     def close(self) -> None:
         """Close the database connection."""
         if self._conn is not None:
