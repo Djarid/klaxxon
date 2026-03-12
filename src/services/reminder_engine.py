@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from ..config import EscalationProfile
 from ..models.reminder import Reminder, ReminderState
 from ..repository.sqlite import SqliteReminderRepository
 from .reminder_service import ReminderService
 from .notification.base import MessageSender
+
+if TYPE_CHECKING:
+    from .ack_token_service import AckTokenService
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +33,14 @@ class ReminderEngine:
         sender: MessageSender,
         recipient: str,
         escalation_profiles: dict[str, EscalationProfile],
+        ack_token_service: Optional["AckTokenService"] = None,
     ) -> None:
         self._service = service
         self._repo = repository
         self._sender = sender
         self._recipient = recipient
         self._profiles = escalation_profiles
+        self._ack_token_service = ack_token_service
 
     async def tick(self) -> None:
         """Run one scheduler cycle. Called periodically by the main loop."""

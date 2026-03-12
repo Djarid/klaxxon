@@ -1,4 +1,4 @@
-"""SQLite implementation of the ReminderRepository.
+"""SQLite implementation of the ReminderRepository and AckTokenRepository.
 
 Single-file database, no external dependencies.
 Schema is created on first connection if tables don't exist.
@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from ..models.ack_token import AckToken
 from ..models.reminder import Reminder, ReminderState
-from .base import ReminderRepository
+from .base import AckTokenRepository, ReminderRepository
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS reminders (
@@ -52,11 +53,23 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS ack_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    reminder_id INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0,
+    used_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_reminders_state ON reminders(state);
 CREATE INDEX IF NOT EXISTS idx_reminders_starts_at ON reminders(starts_at);
 CREATE INDEX IF NOT EXISTS idx_reminders_schedule_id ON reminders(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_reminder_log_reminder ON reminder_log(reminder_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_hash ON auth_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_ack_tokens_hash ON ack_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_ack_tokens_reminder ON ack_tokens(reminder_id);
 """
 
 
@@ -68,6 +81,18 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     if value is None:
         return None
     return datetime.fromisoformat(value)
+
+
+def _row_to_ack_token(row: sqlite3.Row) -> AckToken:
+    return AckToken(
+        id=row["id"],
+        token_hash=row["token_hash"],
+        reminder_id=row["reminder_id"],
+        created_at=_parse_dt(row["created_at"]),
+        expires_at=_parse_dt(row["expires_at"]),
+        used=bool(row["used"]),
+        used_at=_parse_dt(row["used_at"]),
+    )
 
 
 def _row_to_reminder(row: sqlite3.Row) -> Reminder:
@@ -92,7 +117,7 @@ def _row_to_reminder(row: sqlite3.Row) -> Reminder:
     )
 
 
-class SqliteReminderRepository(ReminderRepository):
+class SqliteReminderRepository(ReminderRepository, AckTokenRepository):
     """SQLite-backed reminder storage."""
 
     def __init__(self, db_path: str | Path = ":memory:") -> None:
@@ -331,6 +356,53 @@ class SqliteReminderRepository(ReminderRepository):
                     return reminder
 
         return None
+
+    # ------------------------------------------------------------------
+    # AckTokenRepository implementation
+    # ------------------------------------------------------------------
+
+    def store_token(
+        self,
+        token_hash: str,
+        reminder_id: int,
+        expires_at: datetime,
+    ) -> None:
+        """Persist a new ack token (hash only — raw token is never stored)."""
+        now = _now_utc()
+        conn = self._get_conn()
+        conn.execute(
+            """INSERT INTO ack_tokens (token_hash, reminder_id, created_at, expires_at, used)
+            VALUES (?, ?, ?, ?, 0)""",
+            (token_hash, reminder_id, now, expires_at.isoformat()),
+        )
+        conn.commit()
+
+    def get_by_hash(self, token_hash: str) -> Optional[AckToken]:
+        """Look up an ack token by its SHA-256 hash."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM ack_tokens WHERE token_hash = ?", (token_hash,)
+        ).fetchone()
+        if row is None:
+            return None
+        return _row_to_ack_token(row)
+
+    def mark_used(self, token_hash: str) -> bool:
+        """Atomically mark a token as used via single UPDATE … WHERE used = 0.
+
+        Returns True if the row was updated (token existed and was unused).
+        Returns False if not found or already used — preventing concurrent double-use.
+        """
+        now = _now_utc()
+        conn = self._get_conn()
+        cursor = conn.execute(
+            """UPDATE ack_tokens
+            SET used = 1, used_at = ?
+            WHERE token_hash = ? AND used = 0""",
+            (now, token_hash),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
 
     def close(self) -> None:
         """Close the database connection."""
