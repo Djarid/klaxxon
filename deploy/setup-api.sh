@@ -24,7 +24,7 @@ MEMORY=512
 SWAP=256
 DISK="local-lvm:4"
 CORES=1
-TRAEFIK_CTID=100
+TRAEFIK_CTID=104
 TRAEFIK_CONF_DIR="/etc/traefik/conf.d"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
