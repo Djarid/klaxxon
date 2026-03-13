@@ -43,6 +43,7 @@ from ..services.schedule_service import (
     ScheduleValidationError,
 )
 from ..services.state_machine import InvalidTransitionError
+from ..version import __version__
 from .auth import verify_token
 
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_token)])
@@ -260,6 +261,7 @@ async def health() -> HealthResponse:
 
     return HealthResponse(
         status="ok",
+        version=__version__,
         signal_connected=signal_ok,
         db_ok=True,
         next_reminder=None,  # TODO: calculate from scheduler

@@ -107,6 +107,7 @@ class HealthResponse(BaseModel):
     """Response body for health check."""
 
     status: str
+    version: str
     signal_connected: bool
     db_ok: bool
     next_reminder: Optional[datetime]
