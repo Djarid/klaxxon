@@ -75,14 +75,10 @@ class AppConfig:
     # API
     bearer_token: str = ""
     api_host: str = "0.0.0.0"
-    api_port: int = 8443
+    api_port: int = 8000
 
     # Database
     db_path: str = ":memory:"
-
-    # TLS
-    tls_cert: Optional[str] = None
-    tls_key: Optional[str] = None
 
     # Timezone
     timezone: str = "Europe/London"
@@ -193,8 +189,6 @@ def load_config(
     cfg.signal_recipient = os.environ.get("SIGNAL_RECIPIENT", cfg.signal_recipient)
     cfg.bearer_token = os.environ.get("API_BEARER_TOKEN", cfg.bearer_token)
     cfg.db_path = os.environ.get("DB_PATH", cfg.db_path)
-    cfg.tls_cert = os.environ.get("TLS_CERT_PATH", cfg.tls_cert)
-    cfg.tls_key = os.environ.get("TLS_KEY_PATH", cfg.tls_key)
 
     # Public base URL for ack token links (E-11: strip trailing slash)
     raw_base_url = os.environ.get("KLAXXON_BASE_URL", "").strip()

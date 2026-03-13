@@ -848,7 +848,7 @@ class TestMainPyStaticFilesMount:
         assert MAIN_PY.exists(), f"{MAIN_PY} does not exist"
         content = MAIN_PY.read_text()
         # Match: app.mount("/", StaticFiles(...)
-        assert re.search(r'app\.mount\(\s*["\'/][\s"\']*,\s*StaticFiles', content), (
+        assert re.search(r'app\.mount\(\s*["\'][^"\']*["\'],\s*StaticFiles', content), (
             "src/main.py does not mount StaticFiles at '/'; "
             "AC-24 requires mounting at root for SPA serving"
         )

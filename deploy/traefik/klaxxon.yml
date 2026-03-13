@@ -1,0 +1,21 @@
+# Traefik dynamic config for Klaxxon
+# Deployed to /etc/traefik/conf.d/klaxxon.yml on the Traefik LXC
+#
+# Routes klaxxon.horizons-call.com → LXC 111 (plain HTTP)
+
+http:
+  routers:
+    klaxxon:
+      rule: "Host(`klaxxon.horizons-call.com`)"
+      entryPoints:
+        - web
+        - websecure
+      service: klaxxon-api
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    klaxxon-api:
+      loadBalancer:
+        servers:
+          - url: "http://192.168.1.11:8000"
