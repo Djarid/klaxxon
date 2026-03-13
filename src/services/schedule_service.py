@@ -163,16 +163,24 @@ class ScheduleService:
 
         Logic:
         1. Get all active schedules
-        2. For each schedule, calculate next occurrences within 48-hour window
-        3. Check if reminder already exists (same schedule_id + starts_at within 1 min)
-        4. If not, create reminder with fields inherited from schedule
-        5. Return list of newly created reminders
+        2. For each schedule:
+           a. If an active (PENDING or REMINDING) instance already exists, skip.
+           b. Otherwise, calculate next occurrences within 48-hour window and
+              create only the FIRST (earliest) non-duplicate occurrence.
+        3. Return list of newly created reminders.
+
+        NEW RULE: At most one active (PENDING/REMINDING) instance per schedule.
+        If an active instance already exists, no new instance is created.
+        When no active instance exists, only the next (earliest) occurrence is
+        materialised — not all occurrences in the 48h window (REQ-7).
+
+        This prevents catch-up flooding when the app was offline: only the
+        single next-upcoming occurrence is spawned (REQ-4).
 
         Handles:
         - Daily, weekly, and custom recurrence patterns
         - Timezone conversion (local time → UTC)
         - DST transitions (via ZoneInfo)
-        - Catch-up for missed spawns (app downtime)
         """
         schedules = self._schedule_repo.list(active_only=True)
         if not schedules:
@@ -185,10 +193,20 @@ class ScheduleService:
         spawned: list[Reminder] = []
 
         for schedule in schedules:
+            # REQ-1 / REQ-2: Skip this schedule if an active instance already exists.
+            if self._reminder_repo.has_active_for_schedule(schedule.id):
+                logger.debug(
+                    "Schedule %d (%s): active instance exists, skipping spawn",
+                    schedule.id,
+                    schedule.title,
+                )
+                continue
+
             occurrences = self._calculate_occurrences(schedule, now_local, window_end)
 
+            # REQ-7: Create only the FIRST (earliest) non-duplicate occurrence.
             for occurrence_utc in occurrences:
-                # Check if reminder already exists
+                # Secondary dedup guard: same schedule + same time within 1 min
                 if self._reminder_exists(schedule.id, occurrence_utc):
                     continue
 
@@ -216,6 +234,8 @@ class ScheduleService:
                     schedule.title,
                     occurrence_utc.isoformat(),
                 )
+                # Stop after the first occurrence — at most one per schedule per spawn.
+                break
 
         if spawned:
             logger.info("Spawned %d reminders from schedules", len(spawned))
