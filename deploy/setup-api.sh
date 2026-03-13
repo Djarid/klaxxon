@@ -7,7 +7,6 @@
 # Prerequisites:
 #   - pve1 reachable via SSH
 #   - Debian 12 template cached on pve1
-#   - Certs generated (deploy/gen-certs.sh)
 #   - .env file configured at repo root
 #
 # Usage: ./deploy/setup-api.sh
@@ -25,19 +24,13 @@ MEMORY=512
 SWAP=256
 DISK="local-lvm:4"
 CORES=1
+TRAEFIK_CTID=100
+TRAEFIK_CONF_DIR="/etc/traefik/conf.d"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CERT_DIR="$SCRIPT_DIR/certs"
 
 # --- Validate prerequisites ---
-for f in ca.crt api.crt api.key; do
-    if [ ! -f "$CERT_DIR/$f" ]; then
-        echo "ERROR: Missing $CERT_DIR/$f. Run gen-certs.sh first."
-        exit 1
-    fi
-done
-
 if [ ! -f "$REPO_DIR/.env" ]; then
     echo "ERROR: Missing $REPO_DIR/.env. Copy from .env.template and configure."
     exit 1
@@ -72,16 +65,6 @@ sleep 5
 echo "  LXC $CTID created and started."
 PVEOF
 
-# --- Copy certs ---
-echo "Copying certs..."
-ssh "$PVE_HOST" "sudo pct exec $CTID -- mkdir -p /etc/klaxxon/certs"
-for f in ca.crt api.crt api.key; do
-    ssh "$PVE_HOST" "cat > /tmp/klaxxon_$f" < "$CERT_DIR/$f"
-    ssh "$PVE_HOST" "sudo pct push $CTID /tmp/klaxxon_$f /etc/klaxxon/certs/$f"
-    ssh "$PVE_HOST" "rm /tmp/klaxxon_$f"
-done
-ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -c 'chmod 600 /etc/klaxxon/certs/*.key && chown klaxxon:klaxxon /etc/klaxxon/certs/*.key'"
-
 # --- Install Python and deploy app ---
 echo "Installing Python and deploying app..."
 ssh "$PVE_HOST" "sudo pct exec $CTID -- bash -s" <<'LXCEOF'
@@ -90,9 +73,9 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip
+apt-get install -y -qq python3 python3-venv python3-pip sqlite3
 
-# Create app user
+# Create app user FIRST (before any chown operations)
 useradd --system --home-dir /opt/klaxxon --create-home --shell /usr/sbin/nologin klaxxon || true
 
 # Create directory structure
@@ -103,10 +86,10 @@ LXCEOF
 # --- Copy application files ---
 echo "Deploying application code..."
 
-# Create a tarball of the source, config, and requirements
+# Create a tarball of the source, config, requirements, and web SPA
 TMPTAR="/tmp/klaxxon-deploy.tar.gz"
 tar -czf "$TMPTAR" -C "$REPO_DIR" \
-    src/ config.yaml requirements.txt .env 2>/dev/null
+    src/ web/ config.yaml requirements.txt .env 2>/dev/null
 
 # Push tarball to LXC
 scp "$TMPTAR" "$PVE_HOST":/tmp/klaxxon-deploy.tar.gz
@@ -124,8 +107,6 @@ rm deploy.tar.gz
 
 # Fix .env paths for LXC
 sed -i 's|DB_PATH=.*|DB_PATH=/opt/klaxxon/data/meetings.db|' .env
-sed -i 's|TLS_CERT_PATH=.*|TLS_CERT_PATH=/etc/klaxxon/certs/api.crt|' .env
-sed -i 's|TLS_KEY_PATH=.*|TLS_KEY_PATH=/etc/klaxxon/certs/api.key|' .env
 
 # Point Signal API at comms LXC
 sed -i 's|SIGNAL_API_URL=.*|SIGNAL_API_URL=http://192.168.1.10:8082|' .env
@@ -148,9 +129,7 @@ User=klaxxon
 Group=klaxxon
 WorkingDirectory=/opt/klaxxon
 ExecStart=/opt/klaxxon/.venv/bin/uvicorn src.main:app \
-    --host 0.0.0.0 --port 8443 \
-    --ssl-certfile /etc/klaxxon/certs/api.crt \
-    --ssl-keyfile /etc/klaxxon/certs/api.key
+    --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
 EnvironmentFile=/opt/klaxxon/.env
@@ -169,7 +148,20 @@ systemctl status klaxxon-api.service --no-pager || true
 
 LXCEOF
 
+# --- Push Traefik config ---
+echo ""
+echo "=== Pushing Traefik config ==="
+if ssh "$PVE_HOST" "sudo pct status $TRAEFIK_CTID" 2>/dev/null; then
+    scp "$SCRIPT_DIR/traefik/klaxxon.yml" "$PVE_HOST":/tmp/klaxxon-traefik.yml && \
+    ssh "$PVE_HOST" "sudo pct push $TRAEFIK_CTID /tmp/klaxxon-traefik.yml $TRAEFIK_CONF_DIR/klaxxon.yml && rm -f /tmp/klaxxon-traefik.yml" && \
+    ssh "$PVE_HOST" "sudo pct exec $TRAEFIK_CTID -- systemctl reload traefik || true" && \
+    echo "  Traefik config pushed and reloaded." || \
+    echo "  WARNING: Could not push Traefik config — deploy continues without it."
+else
+    echo "  WARNING: Traefik LXC ($TRAEFIK_CTID) not found — skipping Traefik config push." || true
+fi
+
 echo ""
 echo "=== API LXC ($HOSTNAME) provisioned ==="
-echo "API running on https://$IP:8443"
-echo "Health check: curl -k -H 'Authorization: Bearer <token>' https://192.168.1.11:8443/api/health"
+echo "API running on http://192.168.1.11:8000"
+echo "Health check: curl -H 'Authorization: Bearer <token>' http://192.168.1.11:8000/api/health"
