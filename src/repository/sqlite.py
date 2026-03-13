@@ -375,6 +375,21 @@ class SqliteReminderRepository(ReminderRepository, AckTokenRepository):
 
         return None
 
+    def has_active_for_schedule(self, schedule_id: int) -> bool:
+        """Return True if a PENDING or REMINDING reminder exists for this schedule.
+
+        Uses indexed query on schedule_id + state for efficiency (REQ-8).
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            """SELECT 1 FROM reminders
+               WHERE schedule_id = ?
+               AND state IN ('pending', 'reminding')
+               LIMIT 1""",
+            (schedule_id,),
+        ).fetchone()
+        return row is not None
+
     # ------------------------------------------------------------------
     # AckTokenRepository implementation
     # ------------------------------------------------------------------

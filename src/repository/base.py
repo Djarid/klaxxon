@@ -89,6 +89,11 @@ class ReminderRepository(ABC):
         """
         ...
 
+    @abstractmethod
+    def has_active_for_schedule(self, schedule_id: int) -> bool:
+        """Return True if a PENDING or REMINDING reminder exists for this schedule."""
+        ...
+
 
 class ScheduleRepository(ABC):
     """Abstract interface for schedule persistence."""
