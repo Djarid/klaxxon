@@ -185,10 +185,18 @@ class ScheduleService:
         spawned: list[Reminder] = []
 
         for schedule in schedules:
+            # Gate: skip this schedule entirely if a PENDING or REMINDING instance already exists
+            if self._reminder_repo.has_active_for_schedule(schedule.id):
+                logger.debug(
+                    "Schedule %d already has an active reminder — skipping spawn",
+                    schedule.id,
+                )
+                continue
+
             occurrences = self._calculate_occurrences(schedule, now_local, window_end)
 
             for occurrence_utc in occurrences:
-                # Check if reminder already exists
+                # Check if reminder already exists (time-based dedup)
                 if self._reminder_exists(schedule.id, occurrence_utc):
                     continue
 
@@ -216,6 +224,7 @@ class ScheduleService:
                     schedule.title,
                     occurrence_utc.isoformat(),
                 )
+                break  # Only ever spawn ONE new instance per schedule per cycle
 
         if spawned:
             logger.info("Spawned %d reminders from schedules", len(spawned))

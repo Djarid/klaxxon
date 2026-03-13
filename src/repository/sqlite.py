@@ -352,6 +352,19 @@ class SqliteReminderRepository(ReminderRepository, AckTokenRepository):
 
         return self.get(reminder_id)
 
+    def has_active_for_schedule(self, schedule_id: int) -> bool:
+        """Return True if a PENDING or REMINDING reminder exists for this schedule.
+
+        Used by spawn_reminders() as the at-most-one gate.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            """SELECT COUNT(*) AS cnt FROM reminders
+               WHERE schedule_id = ? AND state IN ('pending', 'reminding')""",
+            (schedule_id,),
+        ).fetchone()
+        return bool(row["cnt"] > 0)
+
     def find_by_schedule_and_time(
         self, schedule_id: int, starts_at: datetime
     ) -> Optional[Reminder]:

@@ -72,6 +72,15 @@ class ReminderRepository(ABC):
         ...
 
     @abstractmethod
+    def has_active_for_schedule(self, schedule_id: int) -> bool:
+        """Return True if a PENDING or REMINDING reminder exists for this schedule.
+
+        Used by spawn_reminders() to skip spawning when an active instance
+        already exists (at-most-one gate).
+        """
+        ...
+
+    @abstractmethod
     def delete_terminal_reminders(
         self,
         cutoff: datetime,
