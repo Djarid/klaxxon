@@ -19,6 +19,7 @@ from .api.ack_routes import router as ack_router
 from .api.ack_routes import set_dependencies as ack_set_dependencies
 from .api.auth import register_token
 from .config import AppConfig, load_config
+from .version import __version__
 from .repository.sqlite import SqliteReminderRepository
 from .repository.schedule_sqlite import SqliteScheduleRepository
 from .services.ack_token_service import AckTokenService
@@ -190,7 +191,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Klaxxon",
     description="ADHD reminder system with escalating Signal notifications",
-    version="0.2.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
